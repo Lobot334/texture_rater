@@ -1,0 +1,2933 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MC Texture Rater</title>
+<!-- Einzige externe Abhängigkeit: JSZip per CDN -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  :root{
+    --bg:#15171c; --panel:#1e2128; --panel2:#262a33;
+    --fg:#e6e8ec; --muted:#8a909c; --accent:#5b9cff; --border:#333845;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--fg);
+    font:14px/1.4 system-ui, sans-serif;
+  }
+  header{
+    position:sticky; top:0; z-index:5; background:var(--panel);
+    border-bottom:1px solid var(--border); padding:14px 18px;
+    display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+  }
+  h1{font-size:16px; margin:0; font-weight:600}
+  .spacer{flex:1}
+  button, .filebtn{
+    background:transparent; color:var(--fg); border:1px solid var(--border);
+    padding:7px 12px; border-radius:6px; cursor:pointer; font:inherit;
+  }
+  button:hover, .filebtn:hover{border-color:var(--accent)}
+  button.danger:hover{border-color:#e2554f; color:#ff7b73}
+  /* einzige Akzentfüllung: Bewerten starten */
+  button.primary{
+    background:var(--accent); color:#0f1115; border-color:var(--accent); font-weight:600;
+  }
+  button.primary:hover{filter:brightness(1.08); border-color:var(--accent)}
+  .filebtn.subtle{color:var(--muted)}
+  .brand{display:flex; align-items:center; gap:14px}
+  .cmds{display:flex; align-items:center; gap:8px}
+  /* Dropdown-Menü (Daten, Gruppen) via <details> */
+  .menu{position:relative; display:inline-block}
+  .menu>summary{
+    list-style:none; cursor:pointer; user-select:none;
+    background:transparent; color:var(--fg); border:1px solid var(--border);
+    padding:7px 12px; border-radius:6px;
+  }
+  .menu>summary::-webkit-details-marker{display:none}
+  .menu>summary:hover, .menu[open]>summary{border-color:var(--accent)}
+  .menu-pop{
+    position:absolute; right:0; top:calc(100% + 6px); z-index:30;
+    display:flex; flex-direction:column; gap:2px; min-width:210px;
+    background:var(--panel2); border:1px solid var(--border); border-radius:8px;
+    padding:6px; box-shadow:0 8px 24px rgba(0,0,0,.45);
+  }
+  .menu-item{
+    text-align:left; width:100%; border:0; background:transparent; border-radius:6px;
+    padding:8px 10px; color:var(--fg); cursor:pointer; display:block;
+  }
+  .menu-item:hover{background:var(--panel)}
+  .menu-sep{height:1px; background:var(--border); margin:4px 2px}
+  .menu-item.danger{color:#ff7b73}
+  .menu-item.danger:hover{background:#3a2422}
+  input[type=file]{display:none}
+  #status{color:var(--muted); font-size:13px}
+  main{padding:18px; width:92vw; max-width:1760px; margin:0 auto}
+  /* Kennzahlen-Hero (ersetzt Dropzone + Ordner-Checkboxen oben) */
+  #hero{
+    display:flex; align-items:center; gap:24px; flex-wrap:wrap;
+    margin-bottom:18px; padding:20px 22px;
+    background:linear-gradient(180deg,#161b26,#12151c);
+    border:1px solid var(--border); border-radius:12px;
+  }
+  #hero.empty{display:block; color:var(--muted)}
+  .hero-avg{flex:0 0 auto; display:flex; flex-direction:column; justify-content:center}
+  .hero-avg .lab{
+    font-size:13px; letter-spacing:0; text-transform:none;
+    color:var(--muted); margin-bottom:4px;
+  }
+  /* Glow wie der Dashboard-XP-Balken (gleiche Shadow-Technik), in Teal — unverändert */
+  .hero-avg .val{
+    font-size:52px; font-weight:800; line-height:1; color:#5fe0c0;
+    font-variant-numeric:tabular-nums; text-shadow:0 0 16px rgba(95,224,192,.6);
+  }
+  .hero-divider{flex:0 0 auto; align-self:stretch; width:0.5px; background:var(--border)}
+  .hero-sec{
+    flex:1; display:grid; grid-template-columns:repeat(3,1fr);
+    gap:18px; align-items:center;
+  }
+  .hero-metric .lab{font-size:12px; color:var(--muted); margin-bottom:6px}
+  .hero-metric .num{
+    font-size:27px; font-weight:600; line-height:1; color:var(--fg);
+    font-variant-numeric:tabular-nums; margin-bottom:8px;
+  }
+  .hero-metric .num small{font-size:14px; font-weight:400; color:var(--muted)}
+  .hero-bar{height:4px; border-radius:3px; background:rgba(128,128,134,.22); overflow:hidden}
+  .hero-bar>div{height:100%; border-radius:3px; transition:width .15s}
+  .hero-bar.blue>div{background:var(--accent)}
+  .hero-bar.teal>div{background:#1D9E75; box-shadow:0 0 10px rgba(29,158,117,.55)}
+  .hero-cats{display:flex; flex-direction:column; gap:8px}
+  .hero-cat{display:flex; justify-content:flex-start; align-items:baseline; gap:8px}
+  .hero-cat .k{font-size:12px; color:var(--muted); text-transform:capitalize}
+  .hero-cat .v{font-size:16px; font-weight:500; color:var(--fg); font-variant-numeric:tabular-nums}
+
+  /* Vollflächen-ZIP-Overlay */
+  #dropzone-overlay{
+    position:fixed; inset:0; z-index:200;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px;
+    background:rgba(15,17,21,.82); border:3px dashed var(--accent);
+    font-size:28px; font-weight:700; color:var(--fg); pointer-events:none;
+  }
+  #dropzone-overlay[hidden]{display:none}
+  #dropzone-overlay svg{stroke:var(--accent)}
+
+  /* Kategorie-Auswahl (einklappbar) */
+  #categories{
+    display:flex; flex-wrap:wrap; gap:8px 14px; margin-bottom:22px;
+    padding:12px; background:var(--panel); border:1px solid var(--border);
+    border-radius:8px;
+  }
+  #categories:empty{display:none}
+  #categories[hidden]{display:none}
+  label.cat{
+    display:inline-flex; align-items:center; gap:6px; cursor:pointer;
+    user-select:none; padding:4px 8px; border-radius:5px; background:var(--panel2);
+  }
+  label.cat:hover{outline:1px solid var(--border)}
+  /* Übersicht */
+  section{margin-bottom:26px}
+  section h2{
+    font-size:15px; margin:0 0 10px; padding-bottom:6px;
+    border-bottom:1px solid var(--border); text-transform:capitalize;
+  }
+  .grid{
+    display:grid; gap:12px;
+    grid-template-columns:repeat(auto-fill, minmax(96px,1fr));
+  }
+  .tile{
+    background:var(--panel); border:1px solid var(--border); border-radius:8px;
+    padding:8px; text-align:center;
+  }
+  .tile img{
+    width:80px; height:80px; object-fit:contain;
+    image-rendering:pixelated;            /* scharfe Pixel beim Vergrößern */
+    background:
+      linear-gradient(45deg,#2a2e37 25%,transparent 25%) 0 0/16px 16px,
+      linear-gradient(-45deg,#2a2e37 25%,transparent 25%) 0 8px/16px 16px,
+      linear-gradient(45deg,transparent 75%,#2a2e37 75%) 8px -8px/16px 16px,
+      linear-gradient(-45deg,transparent 75%,#2a2e37 75%) -8px 0/16px 16px;
+    border-radius:4px;
+  }
+  .tile{cursor:pointer; position:relative}
+  .tile:hover{border-color:var(--accent)}
+  .tile.removed{opacity:.5}
+  .badges{
+    position:absolute; top:5px; right:5px; z-index:1;
+    display:flex; flex-direction:column; gap:3px; align-items:flex-end;
+  }
+  .badge{
+    font-size:10px; font-weight:700;
+    padding:1px 6px; border-radius:9px; color:#fff; letter-spacing:.3px;
+  }
+  .badge.new{background:#2e8b4f}
+  .badge.changed{background:#c08a1e}
+  .badge.removed{background:#a14545}
+  .badge.default{background:#5a5f6b}
+  .badge.excluded{background:#7a4fa1}
+  .badge.group{background:#3a6ea5}
+  .tile.std{cursor:default}
+  .tile .name{
+    margin-top:6px; font-size:12px; color:var(--muted);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .tile .rating{margin-top:3px; font-size:13px; font-weight:600; color:var(--accent)}
+  .tile .rating.unrated{color:var(--muted); font-weight:400; font-style:italic}
+  .tile input.rate-edit{
+    margin-top:3px; width:70px; text-align:center; font-size:14px; padding:2px;
+    background:var(--bg); color:var(--fg); border:1px solid var(--accent); border-radius:4px;
+  }
+  .muted{color:var(--muted)}
+
+  /* ---- Phase 3: Statistik + Filter ---- */
+  #filterbar:empty{display:none}
+  /* Ansichts-Sektionen: hidden schlägt jedes display (Fallstrick wie #rater) */
+  #view-rate[hidden], #view-dashboard[hidden], #view-reports[hidden], #view-finish[hidden]{display:none}
+  /* Diff-Zeile (Re-Upload-Zusammenfassung) */
+  #statusbar{
+    display:flex; justify-content:flex-end; align-items:center;
+    gap:12px 16px; flex-wrap:wrap; margin-bottom:14px;
+  }
+  #statusbar:empty{display:none}
+  #diffbox:empty{display:none}
+  #diffbox{font-size:13px; color:var(--muted); white-space:nowrap}
+  #diff-rate-flagged{padding:5px 11px; font-size:13px}
+  #filterbar{
+    display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-bottom:18px;
+  }
+  .seg{display:inline-flex; border:1px solid var(--border); border-radius:6px; overflow:hidden}
+  .segbtn{border:0; border-radius:0; background:var(--panel); padding:7px 12px}
+  .segbtn+.segbtn{border-left:1px solid var(--border)}
+  .segbtn.active{background:var(--accent); color:#0f1115}
+  #catfilter{
+    background:var(--panel2); color:var(--fg); border:1px solid var(--border);
+    border-radius:6px; padding:7px 10px; font:inherit; text-transform:capitalize;
+  }
+  #sortmode{
+    background:var(--panel2); color:var(--fg); border:1px solid var(--border);
+    border-radius:6px; padding:7px 10px; font:inherit;
+  }
+  /* Filter-Cluster + Trenner */
+  .fcluster{display:flex; align-items:center; gap:8px}
+  .fdiv{width:1px; align-self:stretch; min-height:24px; background:var(--border); margin:0 4px}
+  /* Sichtbarkeits-Schalter */
+  label.fcheck{
+    display:inline-flex; align-items:center; gap:6px; cursor:pointer; user-select:none;
+    padding:6px 10px; border-radius:6px; background:var(--panel2); border:1px solid var(--border);
+  }
+  label.fcheck:hover{border-color:var(--accent)}
+  /* Split-Control "Gruppen" (Hauptklick + Chevron) */
+  .split{display:inline-flex; position:relative; border:1px solid var(--border); border-radius:6px; overflow:visible}
+  .split:hover{border-color:var(--accent)}
+  .split>button{border:0; border-radius:6px 0 0 6px; background:var(--panel)}
+  .split>.menu{position:static}
+  .split>.menu>summary{border:0; border-left:1px solid var(--border); border-radius:0 6px 6px 0; padding:7px 9px}
+  .split .grp-pop{left:0; right:auto; top:calc(100% + 6px)}
+  /* Suche, rechtsbündig zur Verteilungs-Kante */
+  .fsearch{margin-left:auto}
+  #tsearch{
+    background:var(--panel2); color:var(--fg); border:1px solid var(--border);
+    border-radius:6px; padding:7px 10px; font:inherit; min-width:210px;
+  }
+  #tsearch:focus{outline:none; border-color:var(--accent)}
+
+  /* ---- Tier-Leiter Rating-Verteilung ---- */
+  #tierladder:empty{display:none}
+  #tierladder{
+    margin-bottom:18px; padding:12px; background:var(--panel);
+    border:1px solid var(--border); border-radius:8px;
+  }
+  .tl-head{
+    display:flex; align-items:center; justify-content:space-between;
+    margin-bottom:8px; font-size:14px; gap:12px;
+  }
+  .tl-reset{padding:4px 10px; font-size:12px}
+  .tl-tip{
+    position:fixed; z-index:80; pointer-events:none; display:none;
+    background:var(--panel2); color:var(--fg); border:1px solid var(--border);
+    border-radius:6px; padding:5px 9px; font-size:12px; white-space:nowrap;
+    box-shadow:0 4px 14px rgba(0,0,0,.4);
+  }
+  .tl-rows{display:flex; flex-direction:column; gap:4px}
+  .tl-row{
+    display:flex; align-items:center; gap:10px; cursor:pointer;
+    padding:3px 6px; border-radius:6px; border:1px solid transparent;
+    transition:background .12s, border-color .12s;
+  }
+  .tl-row:hover{background:var(--panel2)}
+  .tl-row.active{border-color:var(--accent); background:var(--panel2)}
+  .tl-label{
+    flex:0 0 60px; font-size:13px; color:var(--fg);
+    font-variant-numeric:tabular-nums;
+  }
+  .tl-track{
+    flex:1; height:16px; min-width:0; border-radius:8px;
+    background:rgba(128,128,134,.22);   /* neutrales Grau, Light + Dark lesbar */
+    overflow:hidden;
+  }
+  .tl-fill{height:100%; min-width:2px; border-radius:8px; transition:width .15s}
+  .tl-count{
+    flex:0 0 34px; text-align:right; font-size:13px; color:var(--muted);
+    font-variant-numeric:tabular-nums;
+  }
+  .tl-divider{height:1px; background:var(--border); margin:6px 4px}
+  .tl-caption{margin-top:8px; font-size:12px; color:var(--muted)}
+
+  /* ---- Phase 2: Bewertungsansicht ---- */
+#rater{
+    position:fixed; inset:0; z-index:50; background:#0f1115;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding:24px;
+  }
+  #rater[hidden]{ display:none; }
+  .exit{position:absolute; top:16px; right:16px}
+  #rate-stage{display:flex; flex-direction:column; align-items:center; gap:14px; text-align:center}
+  #rate-progress{color:var(--muted); font-size:13px; letter-spacing:.5px}
+  #rate-meta{font-size:18px; font-weight:600}
+  #rate-meta .c{color:var(--muted); font-weight:400; text-transform:capitalize}
+  #rate-img{
+    width:320px; height:320px; object-fit:contain; image-rendering:pixelated;
+    border:1px solid var(--border); border-radius:8px;
+    background:
+      linear-gradient(45deg,#2a2e37 25%,transparent 25%) 0 0/24px 24px,
+      linear-gradient(-45deg,#2a2e37 25%,transparent 25%) 0 12px/24px 24px,
+      linear-gradient(45deg,transparent 75%,#2a2e37 75%) 12px -12px/24px 24px,
+      linear-gradient(-45deg,transparent 75%,#2a2e37 75%) -12px 0/24px 24px;
+  }
+  #rate-img[hidden], #rate-compare[hidden]{display:none}
+  #rate-stage.excluded #rate-img,
+  #rate-stage.excluded #rate-compare{opacity:.4}
+  #rate-stage.excluded #rate-meta::after{
+    content:" · NICHT BEWERTET"; color:#c79bff; font-weight:600; font-size:13px;
+  }
+  #rate-compare{display:flex; gap:18px; align-items:flex-start; justify-content:center}
+  #rate-compare figure{margin:0; display:flex; flex-direction:column; gap:8px; align-items:center}
+  #rate-compare figcaption{color:var(--muted); font-size:13px}
+  #rate-compare img{
+    width:300px; height:300px; object-fit:contain; image-rendering:pixelated;
+    border:1px solid var(--border); border-radius:8px;
+    background:
+      linear-gradient(45deg,#2a2e37 25%,transparent 25%) 0 0/24px 24px,
+      linear-gradient(-45deg,#2a2e37 25%,transparent 25%) 0 12px/24px 24px,
+      linear-gradient(45deg,transparent 75%,#2a2e37 75%) 12px -12px/24px 24px,
+      linear-gradient(-45deg,transparent 75%,#2a2e37 75%) -12px 0/24px 24px;
+  }
+  #rate-controls{display:flex; flex-direction:column; align-items:center; gap:12px; width:320px}
+  #rate-value{
+    width:130px; text-align:center; font-size:30px; padding:6px 8px;
+    background:var(--panel2); color:var(--fg); border:1px solid var(--border); border-radius:8px;
+  }
+  #rate-slider{width:100%; accent-color:var(--accent)}
+  #rate-hint{color:var(--muted); font-size:12px}
+  #rate-summary{max-width:520px; width:100%}
+  #rate-summary h2{font-size:18px; margin:0 0 10px}
+  table.sum{width:100%; border-collapse:collapse; margin-top:8px}
+  table.sum th, table.sum td{
+    text-align:left; padding:6px 10px; border-bottom:1px solid var(--border);
+  }
+  table.sum th{color:var(--muted); font-weight:500}
+  table.sum td:first-child{text-transform:capitalize}
+
+  /* ---- Gruppen + Override ---- */
+  button.active{background:var(--accent); color:#0f1115}
+  .tile.sel{outline:2px solid var(--accent); border-color:var(--accent)}
+  .tile.grouped-nonrep{opacity:.55}
+  .tile .glabel{
+    margin-top:4px; font-size:10px; color:var(--muted);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .grep-star{color:#ffcc44; margin-right:3px}
+  .tile .exbtn{
+    position:absolute; top:5px; left:5px; z-index:2; font-size:11px; line-height:1;
+    padding:2px 5px; border-radius:6px; background:var(--panel2);
+    border:1px solid var(--border); cursor:pointer; color:var(--muted);
+  }
+  .tile .exbtn.on{background:#7a4fa1; color:#fff; border-color:#7a4fa1}
+  #groupbar{
+    position:fixed; left:50%; bottom:18px; transform:translateX(-50%); z-index:60;
+    display:flex; gap:10px; align-items:center;
+    background:var(--panel2); border:1px solid var(--accent); border-radius:10px;
+    padding:10px 14px; box-shadow:0 6px 24px rgba(0,0,0,.45);
+  }
+  #groupbar[hidden]{display:none}
+  #grouppanel[hidden]{display:none}
+  #grouppanel{
+    margin-bottom:22px; padding:14px; background:var(--panel);
+    border:1px solid var(--border); border-radius:8px;
+  }
+  #grouppanel h2{font-size:15px; margin:0 0 12px}
+  .gcard{
+    background:var(--panel2); border:1px solid var(--border);
+    border-radius:8px; padding:10px; margin-bottom:10px;
+  }
+  .ghead{display:flex; gap:10px; align-items:center; margin-bottom:8px}
+  .gname{
+    flex:1; background:var(--bg); color:var(--fg); border:1px solid var(--border);
+    border-radius:5px; padding:6px 8px; font:inherit;
+  }
+  .gmembers{display:flex; flex-wrap:wrap; gap:10px}
+  .gthumb{
+    position:relative; width:54px; height:54px; padding:3px; cursor:pointer;
+    border:1px solid var(--border); border-radius:6px; background:var(--panel);
+  }
+  .gthumb.rep{border-color:#ffcc44}
+  .gthumb img{width:100%; height:100%; object-fit:contain; image-rendering:pixelated}
+  .gthumb .gx{
+    position:absolute; top:-6px; right:-6px; width:16px; height:16px;
+    line-height:14px; text-align:center; font-size:12px;
+    background:#a14545; color:#fff; border-radius:50%; cursor:pointer;
+  }
+  .gthumb .gstar{position:absolute; top:-7px; left:-4px; font-size:13px; color:#ffcc44}
+
+  /* ---- Badge am Bewerten-Button (Anzahl offener Texturen) ---- */
+  #rate-start{position:relative; overflow:visible}
+  #rate-badge{
+    position:absolute; right:-8px; bottom:-8px; min-width:18px; height:18px;
+    padding:0 5px; border-radius:9px; background:#ffcc44; color:#1a1300;
+    font-size:11px; font-weight:800; line-height:18px; text-align:center;
+    box-shadow:0 0 8px rgba(255,204,68,.7); pointer-events:none;
+  }
+  #rate-badge[hidden]{display:none}
+  #rate-badge.pulse{animation:badgePulse .45s ease}
+  @keyframes badgePulse{
+    0%{transform:scale(.4); opacity:0}
+    60%{transform:scale(1.25); opacity:1}
+    100%{transform:scale(1); opacity:1}
+  }
+
+  /* ---- Dashboard ---- */
+  #dashboard{display:flex; flex-direction:column; gap:18px}
+  .dash-empty{color:var(--muted)}
+  /* Solo-Leveling Status-Panel */
+  .status-panel{
+    position:relative; border:1px solid #2f4a7a; border-radius:12px; padding:18px 20px;
+    background:
+      radial-gradient(120% 120% at 50% -20%, rgba(91,156,255,.16), transparent 60%),
+      linear-gradient(180deg,#161b26,#12151c);
+    box-shadow:inset 0 0 28px rgba(91,156,255,.12), 0 0 0 1px rgba(91,156,255,.08);
+  }
+  .sp-tag{
+    font-size:11px; letter-spacing:3px; color:var(--accent); text-transform:uppercase;
+    margin-bottom:14px; text-shadow:0 0 8px rgba(91,156,255,.6);
+  }
+  .sp-top{display:flex; align-items:flex-end; gap:28px; flex-wrap:wrap}
+  .sp-level{display:flex; flex-direction:column; align-items:center; line-height:1}
+  .sp-level b{font-size:72px; font-weight:800; color:#fff; text-shadow:0 0 16px rgba(91,156,255,.5)}
+  .sp-level span{font-size:12px; letter-spacing:3px; color:var(--muted); margin-top:6px}
+  .sp-rank{font-size:38px; font-weight:800; line-height:1.05}
+  .sp-rank small{display:block; font-size:12px; letter-spacing:3px; color:var(--muted); font-weight:400; margin-top:4px}
+  .sp-xp{margin-top:22px}
+  .sp-xpbar{
+    height:22px; border-radius:12px; background:rgba(128,128,134,.22);
+    overflow:hidden; border:1px solid var(--border); width:100%;
+  }
+  .sp-xpfill{
+    height:100%; border-radius:12px; background:linear-gradient(90deg,#3a6ea5,#5b9cff);
+    box-shadow:0 0 14px rgba(91,156,255,.6);
+  }
+  .sp-xpnums{
+    margin-top:10px; display:flex; align-items:baseline; gap:12px; flex-wrap:wrap;
+    font-variant-numeric:tabular-nums;
+  }
+  .sp-xp-primary{font-size:21px; font-weight:700; color:var(--fg)}
+  .sp-xp-next{font-size:13px; color:var(--muted)}
+  .sp-xp-total{font-size:15px; color:var(--muted); margin-left:auto}
+  .sp-xp-caption{margin-top:12px; text-align:center; font-size:15px; color:var(--muted); font-variant-numeric:tabular-nums}
+  .sp-xp-caption .cap-delta{color:#5fe0c0; font-weight:700; margin-left:6px; text-shadow:0 0 10px rgba(95,224,192,.5)}
+  .sp-ranks{display:flex; gap:6px; margin-top:18px; width:100%}
+  .sp-rankseg{
+    flex:1; text-align:center; font-size:14px; padding:9px 4px; border-radius:6px;
+    border:1px solid var(--border); color:var(--muted); background:var(--panel2);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .sp-rankseg.done{opacity:.75}
+  .sp-rankseg.cur{border-width:2px; font-weight:800; box-shadow:0 0 14px rgba(91,156,255,.35)}
+  .sp-rankseg.future{opacity:.4}
+  .sp-stats{
+    display:grid; gap:8px; margin-top:16px;
+    grid-template-columns:repeat(auto-fit, minmax(120px,1fr));
+  }
+  .sp-stat{background:var(--panel2); border:1px solid var(--border); border-radius:8px; padding:10px 12px}
+  .sp-stat b{display:block; font-size:25px; color:var(--fg); font-variant-numeric:tabular-nums}
+  .sp-stat span{font-size:11px; color:var(--muted)}
+  /* Durchgespielt */
+  .dash-done{padding:12px 16px; background:var(--panel); border:1px solid var(--border); border-radius:8px}
+  .dash-done .lab{display:flex; justify-content:space-between; font-size:13px; margin-bottom:6px}
+  .dash-done-track{height:8px; border-radius:6px; background:rgba(128,128,134,.22); overflow:hidden}
+  .dash-done-fill{height:100%; border-radius:6px; background:#1D9E75; transition:width .15s}
+  .dash-done .hint{margin-top:6px; font-size:12px; color:var(--muted)}
+  /* Karten-Grid */
+  .dash-cards{display:grid; gap:14px; grid-template-columns:1fr}
+  @media(min-width:860px){ .dash-cards{grid-template-columns:1fr 1fr} }
+  .dash-card{background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:14px}
+  .dash-card h3{margin:0 0 10px; font-size:14px; font-weight:600}
+  .dash-card.wide{grid-column:1/-1}
+  .streak-flames{display:flex; gap:24px; align-items:baseline; flex-wrap:wrap}
+  .streak-flames .big{font-size:32px; font-weight:800}
+  .streak-flames .sub{font-size:12px; color:var(--muted)}
+  /* Heatmap */
+  .hm-wrap{display:flex; gap:3px; overflow-x:auto; padding-bottom:4px}
+  .hm-col{display:flex; flex-direction:column; gap:3px}
+  .hm-cell{width:14px; height:14px; border-radius:3px; background:rgba(128,128,134,.18)}
+  .hm-cell.empty{background:transparent}
+  .hm-readout{margin-top:8px; font-size:12px; color:var(--muted); min-height:16px}
+  .hm-forecast{margin-top:10px; font-size:13px; padding-top:10px; border-top:1px solid var(--border)}
+
+  /* ---- Erfolge (Achievements) ---- */
+  .ach-grid{display:grid; gap:10px; grid-template-columns:repeat(auto-fit, minmax(160px,1fr))}
+  .ach-cell{
+    background:var(--panel2); border:1px solid var(--border); border-radius:8px;
+    padding:12px 14px; text-align:center; opacity:.5; transition:opacity .15s, border-color .15s;
+  }
+  .ach-cell.on{opacity:1; border-color:#ffcc44}
+  .ach-cell-ico{display:inline-block; color:var(--muted)}
+  .ach-cell.on .ach-cell-ico{color:#ffcc44}
+  .ach-cell-n{font-size:15px; font-weight:600; margin-top:6px}
+  .ach-cell-d{font-size:12px; color:var(--muted); margin-top:4px}
+  /* Unlock-Toast */
+  .ach-toast{
+    position:fixed; right:18px; bottom:18px; z-index:300;
+    display:flex; gap:12px; align-items:center; max-width:340px;
+    background:var(--panel2); border:1px solid #ffcc44; border-radius:10px;
+    padding:14px 16px; box-shadow:0 8px 28px rgba(0,0,0,.5);
+    transform:translateY(20px); opacity:0; transition:transform .3s, opacity .3s;
+  }
+  .ach-toast.show{transform:translateY(0); opacity:1}
+  .ach-toast .ach-ico{color:#ffcc44; flex:0 0 auto}
+  .ach-h{font-size:11px; letter-spacing:2px; text-transform:uppercase; color:#ffcc44}
+  .ach-n{font-size:17px; font-weight:700}
+  .ach-d{font-size:12px; color:var(--muted)}
+
+  /* ---- Button gesperrt ---- */
+  button:disabled{opacity:.45; cursor:not-allowed}
+  button.primary:disabled{filter:none; border-color:var(--border)}
+
+  /* ---- Berichte-Tab + Abschluss-Listen ---- */
+  .completion .cl-head{font-size:15px; margin-bottom:12px}
+  .completion .cl-head b{color:var(--accent)}
+  .cl-cols{display:grid; grid-template-columns:1fr 1fr; gap:14px}
+  .cl-col h4{margin:0 0 8px; font-size:13px; font-weight:600; color:var(--muted)}
+  .cl-scroll{
+    max-height:260px; overflow-y:auto; border:1px solid var(--border);
+    border-radius:6px; background:var(--panel2);
+  }
+  .cl-row{
+    display:flex; justify-content:space-between; gap:10px;
+    padding:5px 10px; border-bottom:1px solid var(--border);
+  }
+  .cl-row:last-child{border-bottom:0}
+  .cl-name{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .cl-score{font-weight:600; color:var(--accent); font-variant-numeric:tabular-nums}
+  .cl-hist{font-variant-numeric:tabular-nums; color:var(--muted); white-space:nowrap}
+  .cl-delta{margin-left:4px}
+  .cl-delta.up{color:#1D9E75}
+  .cl-delta.down{color:#E24B4A}
+  .cl-delta.zero{color:var(--muted)}
+  .cl-empty{padding:10px}
+  #reports{display:flex; flex-direction:column; gap:16px}
+  .report-item{background:var(--panel); border:1px solid var(--border); border-radius:10px; overflow:hidden}
+  .report-head{
+    display:grid; align-items:center; gap:4px 18px;
+    grid-template-columns:auto 1fr auto; grid-template-areas:"xp meta tog" "xp sum tog";
+    padding:16px 18px; cursor:pointer;
+  }
+  .report-head:hover{background:var(--panel2)}
+  .rep-xp{grid-area:xp; color:var(--accent); font-weight:800; font-size:30px; font-variant-numeric:tabular-nums; align-self:center}
+  .rep-meta{grid-area:meta; display:flex; gap:14px; flex-wrap:wrap; align-items:baseline}
+  .rep-time{font-variant-numeric:tabular-nums; font-weight:600; font-size:14px}
+  .rep-change{color:var(--muted); font-size:13px}
+  .rep-summary{grid-area:sum; font-size:13px}
+  .rep-toggle{grid-area:tog; color:var(--muted); font-size:16px; transition:transform .15s}
+  .report-item.open .rep-toggle{transform:rotate(180deg)}
+  .report-body{padding:0 18px 18px}
+
+  /* ---- Abschluss-Screen ---- */
+  #finish{display:flex; flex-direction:column; gap:22px; max-width:1100px; margin:0 auto}
+  .fin-head{text-align:center; padding:8px 0 4px}
+  .fin-gain{
+    font-size:84px; font-weight:800; line-height:1; color:var(--accent);
+    font-variant-numeric:tabular-nums; text-shadow:0 0 26px rgba(91,156,255,.45);
+  }
+  .fin-gain .fin-xp{font-size:34px; margin-left:8px; font-weight:700}
+  .fin-sub{margin-top:12px; font-size:16px; color:var(--muted)}
+  .fin-stats{
+    display:grid; gap:12px; grid-template-columns:repeat(auto-fit, minmax(150px,1fr));
+  }
+  .fin-stat{background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:14px 16px; text-align:center}
+  .fin-stat b{display:block; font-size:30px; color:var(--fg); font-variant-numeric:tabular-nums}
+  .fin-stat span{font-size:12px; color:var(--muted)}
+  .fin-actions{display:flex; justify-content:center; padding:6px 0 4px}
+  .fin-actions button{font-size:16px; padding:12px 28px}
+
+  /* ---- Coverage-Karte ---- */
+  .cov-grid{display:grid; gap:12px; grid-template-columns:repeat(auto-fit, minmax(120px,1fr))}
+  .cov-cell{background:var(--panel2); border:1px solid var(--border); border-radius:8px; padding:12px 14px; text-align:center}
+  .cov-cell b{display:block; font-size:30px; color:var(--fg); font-variant-numeric:tabular-nums}
+  .cov-cell span{font-size:12px; color:var(--muted)}
+  .dash-card .hint{margin-top:10px; font-size:12px; color:var(--muted)}
+
+  /* ---- Flow: Fortschritt + Durchgespielt ---- */
+  #flow-done{width:320px; margin-top:2px}
+  #flow-done .lab{
+    display:flex; justify-content:space-between; font-size:12px;
+    color:var(--muted); margin-bottom:5px;
+  }
+
+  /* ---- Status-Panel: XP-Animation ---- */
+  #status-panel-el.lvlflash{animation:spFlash .52s ease}
+  #status-panel-el.rankflash{animation:spFlash .85s ease}
+  @keyframes spFlash{
+    0%{box-shadow:inset 0 0 0 rgba(45,224,192,0)}
+    30%{box-shadow:inset 0 0 42px rgba(45,224,192,.55)}
+    100%{box-shadow:inset 0 0 28px rgba(91,156,255,.12)}
+  }
+  #sp-level-num.lvlpulse{animation:spPulse .42s ease}
+  #sp-level-num.rankpulse{animation:spRankPulse .65s ease}
+  #sp-level-num.lvldown{animation:spDown .42s ease}
+  @keyframes spPulse{
+    0%{transform:scale(1)}
+    45%{transform:scale(1.32); color:#5fe0c0; text-shadow:0 0 18px rgba(95,224,192,.85)}
+    100%{transform:scale(1)}
+  }
+  @keyframes spRankPulse{
+    0%{transform:scale(1)}
+    40%{transform:scale(1.5); color:#9fe9d8; text-shadow:0 0 24px rgba(95,224,192,.95)}
+    100%{transform:scale(1)}
+  }
+  @keyframes spDown{
+    0%{transform:scale(1)}
+    45%{transform:scale(.8); color:#E24B4A}
+    100%{transform:scale(1)}
+  }
+  .sp-rank{transition:color .6s ease}
+
+  /* ---- Backup-Erinnerung (nicht blockierend) ---- */
+  .export-reminder{
+    display:flex; align-items:center; gap:12px 16px; flex-wrap:wrap;
+    padding:12px 16px; background:var(--panel); border:1px solid var(--border);
+    border-radius:8px; font-size:13px; color:var(--muted);
+  }
+  .export-reminder span{flex:1; min-width:200px}
+
+  /* ---- Streak-Icons statt Emoji ---- */
+  .sf-ico{vertical-align:-4px}
+  .sf-flame{color:#ef9f3a}
+  .sf-medal{color:#5b9cff}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <h1>MC Texture Rater</h1>
+    <div class="seg" id="view-switch">
+      <button class="segbtn" data-view="rate">Bewerten</button>
+      <button class="segbtn" data-view="dashboard">Dashboard</button>
+      <button class="segbtn" data-view="reports">Berichte</button>
+    </div>
+  </div>
+  <div class="spacer"></div>
+  <div id="status"></div>
+  <div class="cmds">
+    <button id="rate-start" class="primary">Bewerten starten</button>
+    <label class="filebtn subtle">ZIP laden<input type="file" id="file" accept=".zip"></label>
+    <details class="menu" id="data-menu">
+      <summary>Daten ▾</summary>
+      <div class="menu-pop">
+        <label class="menu-item filebtn">Vanilla-Baseline laden<input type="file" id="baseline-file" accept=".jar,.zip"></label>
+        <button class="menu-item" id="backup-export">Backup exportieren</button>
+        <label class="menu-item filebtn">Backup importieren<input type="file" id="backup-file" accept=".json,application/json"></label>
+        <div class="menu-sep"></div>
+        <button class="menu-item danger" id="reset">Alles zurücksetzen</button>
+      </div>
+    </details>
+  </div>
+</header>
+
+<main>
+  <section id="view-rate">
+    <div id="hero"></div>
+    <div id="categories" hidden></div>
+    <div id="statusbar">
+      <div id="diffbox"></div>
+    </div>
+    <div id="filterbar"></div>
+    <div id="tierladder"></div>
+    <div id="grouppanel" hidden></div>
+    <div id="overview"></div>
+  </section>
+  <section id="view-dashboard" hidden>
+    <div id="dashboard"></div>
+  </section>
+  <section id="view-reports" hidden>
+    <div id="reports"></div>
+  </section>
+  <section id="view-finish" hidden>
+    <div id="finish"></div>
+  </section>
+</main>
+
+<div id="groupbar" hidden></div>
+
+<!-- Vollflächen-Overlay: Datei über das Fenster ziehen -->
+<div id="dropzone-overlay" hidden>
+  <svg viewBox="0 0 24 24" width="56" height="56" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2"/><path d="M7 9l5 -5l5 5"/><path d="M12 4v12"/></svg>
+  <div>ZIP hier ablegen</div>
+</div>
+
+<!-- Phase 2: Vollbild-Bewertung -->
+<div id="rater" hidden>
+  <button class="danger exit" id="rate-exit">Beenden (Esc)</button>
+  <div id="rate-stage">
+    <div id="rate-progress"></div>
+    <div id="flow-done">
+      <div class="lab"><span>Durchgespielt</span><span id="flow-done-lab"></span></div>
+      <div class="dash-done-track"><div class="dash-done-fill" id="flow-done-fill"></div></div>
+    </div>
+    <div id="rate-meta"></div>
+    <img id="rate-img" alt="">
+    <div id="rate-compare" hidden>
+      <figure class="cmp">
+        <img id="rate-img-old" alt="">
+        <figcaption>alt · <span id="rate-old-rating"></span></figcaption>
+      </figure>
+      <figure class="cmp">
+        <img id="rate-img-new" alt="">
+        <figcaption>neu</figcaption>
+      </figure>
+    </div>
+    <div id="rate-controls">
+      <input id="rate-value" type="text" inputmode="numeric" autocomplete="off" maxlength="3">
+      <input id="rate-slider" type="range" min="1" max="100" value="50">
+      <button id="rate-exclude">Nicht bewerten (X)</button>
+    </div>
+    <div id="rate-hint">1–100 tippen · Enter = speichern + weiter · X = nicht bewerten / aufheben · ← → blättern · Esc = beenden</div>
+  </div>
+  <div id="rate-summary" hidden></div>
+</div>
+
+<script>
+"use strict";
+
+/* ---------- Konfiguration Gruppen (editierbar) ---------- */
+// Farbtokens, längste zuerst (light_gray vor gray, light_blue vor blue).
+const COLOR_TOKENS = ["light_gray","light_blue","white","orange","magenta","yellow","lime","pink","gray","cyan",
+ "purple","blue","brown","green","red","black"];
+// Nur diese Familien werden über Farbe gruppiert.
+const RECOLOR_FAMILIES = ["wool","carpet","bed","stained_glass","stained_glass_pane_top","stained_glass_pane_side",
+ "concrete","concrete_powder","terracotta","shulker_box","candle","candle_lit","dye"];
+const PREFERRED_COLOR = "white";
+
+/* ---------- IndexedDB ---------- */
+const DB_NAME = "mc-texture-rater", DB_VER = 1;
+let db;
+
+// DB öffnen, zwei Stores: texturen (Datensätze) + settings (Auswahl)
+function openDB(){
+  return new Promise((res,rej)=>{
+    const r = indexedDB.open(DB_NAME, DB_VER);
+    r.onupgradeneeded = e=>{
+      const d = e.target.result;
+      if(!d.objectStoreNames.contains("textures")) d.createObjectStore("textures",{keyPath:"id"});
+      if(!d.objectStoreNames.contains("settings")) d.createObjectStore("settings",{keyPath:"key"});
+    };
+    r.onsuccess = e=>res(e.target.result);
+    r.onerror  = e=>rej(e.target.error);
+  });
+}
+const store = (name,mode)=>db.transaction(name,mode).objectStore(name);
+
+function getAll(name){
+  return new Promise((res,rej)=>{
+    const r = store(name,"readonly").getAll();
+    r.onsuccess = e=>res(e.target.result);
+    r.onerror  = e=>rej(e.target.error);
+  });
+}
+function getOne(name,key){
+  return new Promise((res,rej)=>{
+    const r = store(name,"readonly").get(key);
+    r.onsuccess = e=>res(e.target.result);
+    r.onerror  = e=>rej(e.target.error);
+  });
+}
+function putOne(name,item){
+  return new Promise((res,rej)=>{
+    const r = store(name,"readwrite").put(item);
+    r.onsuccess = ()=>res();
+    r.onerror  = e=>rej(e.target.error);
+  });
+}
+// Viele Datensätze in einer Transaktion schreiben
+function putAll(name,items){
+  return new Promise((res,rej)=>{
+    const t = db.transaction(name,"readwrite");
+    t.oncomplete = ()=>res();
+    t.onerror   = e=>rej(e.target.error);
+    const os = t.objectStore(name);
+    items.forEach(it=>os.put(it));
+  });
+}
+// Beide Stores leeren
+function clearDB(){
+  return new Promise((res,rej)=>{
+    const t = db.transaction(["textures","settings"],"readwrite");
+    t.oncomplete = ()=>res();
+    t.onerror   = e=>rej(e.target.error);
+    t.objectStore("textures").clear();
+    t.objectStore("settings").clear();
+  });
+}
+
+/* ---------- Helfer ---------- */
+const $ = id=>document.getElementById(id);
+const setStatus = txt=>$("status").textContent = txt;
+
+// Kategorie aus Pfad ableiten
+function deriveCategory(path){
+  const marker = "textures/";
+  const idx = path.lastIndexOf(marker);
+  if(idx !== -1){
+    // Segment direkt nach letztem "textures/"
+    const rest = path.slice(idx + marker.length);
+    return rest.split("/")[0] || "?";
+  }
+  // kein "textures/": oberster Ordnername
+  const parts = path.split("/");
+  return parts.length > 1 ? parts[0] : "?";
+}
+// Pfad normalisieren: Teil nach letztem "textures/", sonst voller Pfad.
+// Gleich für Baseline und Pack -> unterschiedliche ZIP-Wurzeln matchen.
+function normPath(path){
+  const marker = "textures/";
+  const idx = path.lastIndexOf(marker);
+  return idx !== -1 ? path.slice(idx + marker.length) : path;
+}
+// Dateiname ohne Endung
+function baseName(path){
+  const file = path.split("/").pop();
+  return file.replace(/\.[^.]+$/, "");
+}
+// Lokaler Tag als YYYY-MM-DD (kein UTC-Versatz)
+function localDay(d){
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+// SHA-256 als Hex
+async function sha256hex(buf){
+  const d = await crypto.subtle.digest("SHA-256", buf);
+  return [...new Uint8Array(d)].map(b=>b.toString(16).padStart(2,"0")).join("");
+}
+// ArrayBuffer -> base64 (chunkweise, gegen Stack-Overflow bei großen Bildern)
+function abToB64(buf){
+  const bytes = new Uint8Array(buf);
+  let bin = "", chunk = 0x8000;
+  for(let i=0;i<bytes.length;i+=chunk)
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i+chunk));
+  return btoa(bin);
+}
+function loadImg(src){
+  return new Promise((res,rej)=>{
+    const img = new Image();
+    img.onload = ()=>res(img);
+    img.onerror = rej;
+    img.src = src;
+  });
+}
+// Anzeige-Data-URL bauen; vertikale Animations-Strips auf erstes Frame kürzen
+async function makeDataUrl(b64){
+  const src = "data:image/png;base64," + b64;
+  const img = await loadImg(src);
+  const w = img.naturalWidth, h = img.naturalHeight;
+  // Strip = höher als breit UND Höhe ganzzahliges Vielfaches der Breite
+  if(h > w && w > 0 && h % w === 0){
+    const c = document.createElement("canvas");
+    c.width = w; c.height = w;
+    c.getContext("2d").drawImage(img, 0,0,w,w, 0,0,w,w); // oberstes quadratisches Frame
+    return c.toDataURL("image/png");
+  }
+  return src; // Original unverändert
+}
+
+// {name,count} je Kategorie
+function categoriesOf(textures){
+  const m = new Map();
+  textures.forEach(t=>m.set(t.category, (m.get(t.category)||0)+1));
+  return [...m].map(([name,count])=>({name,count}))
+              .sort((a,b)=>a.name.localeCompare(b.name));
+}
+
+/* ---------- Gruppen: Erkennung + Verwaltung ---------- */
+function escapeHtml(s){
+  return s.replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+}
+function genId(){ return "g" + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+// Gruppenfarbe deterministisch aus id (Hash -> HSL), nicht gespeichert.
+function groupColor(id){
+  let h = 0;
+  for(const ch of id) h = (h*31 + ch.charCodeAt(0)) >>> 0;
+  return `hsl(${h % 360} 70% 55%)`;
+}
+// Erstes passendes COLOR_TOKEN als Präfix (mit folgendem "_"), sonst null.
+function colorOf(lower){
+  for(const tok of COLOR_TOKENS){ if(lower.startsWith(tok + "_")) return tok; }
+  return null;
+}
+// Familien-Info oder null. Reihenfolge fix.
+function familyInfo(category, lower){
+  let m;
+  if((m = lower.match(/^(.+)_door_(top|bottom)$/)))
+    return {key: category+"|"+m[1]+"_door", kind:"pair", role:m[2]};
+  if((m = lower.match(/^(.+?)_stage_?(\d+)$/)))
+    return {key: category+"|"+m[1], kind:"stage", num:Number(m[2])};
+  if((m = lower.match(/^(frosted_ice|fire|soul_fire)_(\d+)$/)))
+    return {key: category+"|"+m[1], kind:"stage", num:Number(m[2])};
+  const tok = colorOf(lower);
+  if(tok){
+    const rest = lower.slice(tok.length + 1);
+    if(RECOLOR_FAMILIES.includes(rest))
+      return {key: category+"|"+rest, kind:"color", role:tok};
+  }
+  return null;
+}
+// Familienschlüssel lesbar machen: "block|oak_door" -> "Oak Door".
+function keyToName(key){
+  return key.split("|").pop().split("_").filter(Boolean)
+    .map(w=> w[0].toUpperCase() + w.slice(1)).join(" ");
+}
+
+// bewertbar als Repräsentant (Override + Standard zählen, Gruppenrolle nicht)
+function repEligible(t){ return !!t && !t.isDefault && t.rateOverride !== "exclude"; }
+
+// Repräsentant je Gruppe bei Vorschlag (kind bekannt). arr=[{t,info}].
+function chooseRep(kind, arr){
+  const elig = arr.filter(c=>repEligible(c.t));
+  const pool = elig.length ? elig : arr;
+  if(kind === "color"){
+    let c = pool.find(x=>x.info.role === PREFERRED_COLOR); if(c) return c.t;
+    c = pool.find(x=>x.info.role == null);                 if(c) return c.t;
+    return pool.slice().sort((a,b)=>
+      COLOR_TOKENS.indexOf(a.info.role) - COLOR_TOKENS.indexOf(b.info.role))[0].t;
+  }
+  if(kind === "stage") return pool.slice().sort((a,b)=> b.info.num - a.info.num)[0].t;
+  if(kind === "pair"){
+    const c = pool.find(x=>x.info.role === "top"); if(c) return c.t;
+    return pool.slice().sort((a,b)=>a.t.name.localeCompare(b.t.name))[0].t;
+  }
+  return pool.slice().sort((a,b)=>a.t.name.localeCompare(b.t.name))[0].t;
+}
+// Rep eines bestehenden (kind-losen) Gruppenobjekts gültig halten: erstes alphabetisch.
+function ensureValidRep(g){
+  const members = g.memberIds.map(id=>texById.get(id)).filter(Boolean);
+  if(members.length === 0) return;
+  // Rep bleibt gültig solange er existiert und kein Default ist; exclude
+  // disqualifiziert NICHT — der Rep ist Träger des Gruppen-exclude.
+  if(members.some(t=> t.id === g.repId && !t.isDefault)) return;
+  const sorted = members.slice().sort((a,b)=>a.name.localeCompare(b.name));
+  const nonDef = sorted.filter(t=> !t.isDefault);
+  g.repId = (nonDef.length ? nonDef : sorted)[0].id;
+}
+// Mitglieder mit fehlenden Texturen säubern, <2 auflösen, Rep prüfen.
+function normalizeGroups(){
+  groups.forEach(g=> g.memberIds = g.memberIds.filter(id=>texById.has(id)));
+  groups = groups.filter(g=> g.memberIds.length >= 2);
+  groups.forEach(ensureValidRep);
+}
+function buildMemberMap(){
+  groupByMember = new Map();
+  groups.forEach(g=> g.memberIds.forEach(id=> groupByMember.set(id, g)));
+}
+function isGroupedNonRep(t){
+  const g = groupByMember.get(t.id);
+  return !!g && g.repId !== t.id;
+}
+// Zentraler exclude-Helfer: in Gruppe entscheidet allein der Repräsentant,
+// ungruppiert die eigene rateOverride. Einzel-exclude bleibt gespeichert, wird
+// in der Gruppe nur ignoriert (greift wieder beim Verlassen).
+function isExcluded(t){
+  const g = groupByMember.get(t.id);
+  if(g){ const rep = texById.get(g.repId); return !!rep && rep.rateOverride === "exclude"; }
+  return t.rateOverride === "exclude";
+}
+function effectiveRatable(t){
+  return !t.isDefault && !isExcluded(t) && !isGroupedNonRep(t);
+}
+async function persistGroups(){
+  normalizeGroups();
+  buildMemberMap();
+  await putOne("settings", {key:"groups", value: groups});
+}
+
+// Vorschläge: nur Ungruppierte bündeln. Bestehende Gruppen bleiben unberührt.
+async function suggestGroups(){
+  const grouped = new Set();
+  groups.forEach(g=> g.memberIds.forEach(id=>grouped.add(id)));
+  const byKey = new Map();
+  for(const t of allTextures){
+    if(t.isDefault || isExcluded(t) || grouped.has(t.id)) continue;
+    const info = familyInfo(t.category, t.name.toLowerCase());
+    if(!info) continue;
+    if(!byKey.has(info.key)) byKey.set(info.key, []);
+    byKey.get(info.key).push({t, info});
+  }
+  for(const [key, arr] of byKey){
+    if(arr.length < 2) continue;
+    const rep = chooseRep(arr[0].info.kind, arr);
+    groups.push({ id: genId(), name: keyToName(key), repId: rep.id, memberIds: arr.map(c=>c.t.id) });
+  }
+  await persistGroups();
+  renderAll();
+}
+
+// Ein-/ausschließen. In Gruppe wirkt es nur am Repräsentanten (Träger des
+// Gruppen-exclude). Ungruppiert auf die Textur selbst. Rating bleibt eingefroren.
+async function toggleExclude(t){
+  const g = groupByMember.get(t.id);
+  const target = g ? texById.get(g.repId) : t;
+  if(!target) return;
+  target.rateOverride = target.rateOverride === "exclude" ? null : "exclude";
+  await putOne("textures", target);
+  await persistGroups();
+  await refresh();
+}
+
+/* ---------- ZIP verarbeiten ---------- */
+async function handleZip(blob){
+  try{
+    setStatus("Lese ZIP …");
+    const zip = await JSZip.loadAsync(blob);
+    // alle PNG-Dateien (nicht Ordner)
+    const entries = Object.values(zip.files)
+      .filter(f=>!f.dir && /\.png$/i.test(f.name));
+    if(entries.length === 0){ setStatus("Keine PNG im ZIP gefunden."); return; }
+
+    // Bestand laden -> Diff statt Ersetzen
+    const existing = await getAll("textures");
+    const exMap = new Map(existing.map(t=>[t.id, t]));
+    const isFirstImport = existing.length === 0;
+    const seen = new Set();
+    const toPut = [];                              // nur berührte Datensätze
+    let cNew=0, cChanged=0, cUnchanged=0, cRemoved=0;
+
+    for(let i=0;i<entries.length;i++){
+      const f = entries[i];
+      setStatus(`Verarbeite ${i+1}/${entries.length} …`);
+      seen.add(f.name);
+      const buf = await f.async("arraybuffer");
+      const hash = await sha256hex(buf);
+      const old = exMap.get(f.name);
+
+      if(!old){                                    // Pfad unbekannt -> neu
+        const b64 = abToB64(buf);
+        toPut.push({
+          id: f.name, name: baseName(f.name), category: deriveCategory(f.name),
+          hash, dataUrl: await makeDataUrl(b64), rating: null, flag: "new",
+          isDefault: baseline[normPath(f.name)] === hash
+        });
+        cNew++;
+      }else if(old.hash === hash){                 // unverändert -> Wertung + dataUrl behalten
+        if(old.flag === "removed"){ old.flag = null; toPut.push(old); } // war entfernt, wieder da
+        cUnchanged++;
+      }else{                                       // geändert -> alt sichern, Wertung zurücksetzen
+        const b64 = abToB64(buf);
+        // altes Bild/Rating für Vergleich sichern: nur bei gültigem Alt-Wert,
+        // und NICHT überschreiben wenn schon ein offenes prev existiert (mehrfaches Ändern)
+        if(old.dataUrl && old.prevDataUrl == null) old.prevDataUrl = old.dataUrl;
+        if(old.rating != null && old.prevRating == null) old.prevRating = old.rating;
+        old.rating = null;                         // muss neu bewertet werden (alt/neu)
+        old.dataUrl = await makeDataUrl(b64);
+        old.hash = hash;
+        old.flag = "changed";
+        old.isDefault = baseline[normPath(old.id)] === hash;
+        toPut.push(old);
+        cChanged++;
+      }
+    }
+
+    // im Bestand, aber nicht mehr im ZIP -> als entfernt markieren (nicht löschen)
+    for(const old of existing){
+      if(!seen.has(old.id)){
+        if(old.flag !== "removed"){ old.flag = "removed"; toPut.push(old); }
+        cRemoved++;
+      }
+    }
+
+    await putAll("textures", toPut);
+    // Standardauswahl nur beim allerersten Import setzen
+    if(isFirstImport){
+      const cats = [...new Set(toPut.map(t=>t.category))];
+      const sel = ["block","item"].filter(c=>cats.includes(c));
+      await putOne("settings", {key:"selectedCategories", value:sel});
+    }
+
+    await refresh();
+    // Erst-Vorschlag nur wenn noch gar keine Gruppe existiert.
+    if(groups.length === 0) await suggestGroups();
+    renderDiff({cNew, cChanged, cUnchanged, cRemoved});
+    setStatus(`Update: +${cNew} neu, ${cChanged} geändert, ${cUnchanged} unverändert, ${cRemoved} entfernt.`);
+  }catch(err){
+    console.error(err);
+    setStatus("Fehler: " + err.message);
+  }
+}
+
+/* ---------- Vanilla-Baseline ---------- */
+// Jar/ZIP mit Vanilla-Texturen einlesen, pro PNG nur normPath + Hash merken.
+async function handleBaseline(blob){
+  try{
+    setStatus("Lese Baseline …");
+    const zip = await JSZip.loadAsync(blob);
+    // alle PNGs unter textures/ (kein Ordner)
+    const entries = Object.values(zip.files)
+      .filter(f=>!f.dir && /\.png$/i.test(f.name) && f.name.includes("textures/"));
+    if(entries.length === 0){ setStatus("Keine Texturen unter textures/ gefunden."); return; }
+
+    const baselineMap = {};                        // { normPath: hash }, keine Bilder
+    for(let i=0;i<entries.length;i++){
+      const f = entries[i];
+      setStatus(`Baseline ${i+1}/${entries.length} …`);
+      const buf = await f.async("arraybuffer");
+      baselineMap[normPath(f.name)] = await sha256hex(buf);
+    }
+    await putOne("settings", {key:"baseline", value:baselineMap});
+    baseline = baselineMap;
+
+    // alle bereits gespeicherten Texturen mit neuem isDefault auswerten + speichern
+    const txs = await getAll("textures");
+    txs.forEach(t=> t.isDefault = baseline[normPath(t.id)] === t.hash);
+    await putAll("textures", txs);
+
+    const nRef = Object.keys(baselineMap).length;
+    const mDefault = txs.filter(t=>t.isDefault).length;
+    await refresh();
+    setStatus(`Baseline: ${nRef} Referenz-Texturen, davon ${mDefault} im Pack als Standard erkannt.`);
+  }catch(err){
+    console.error(err);
+    setStatus("Fehler: " + err.message);
+  }
+}
+
+// Diff-Zusammenfassung anzeigen
+function renderDiff(c){
+  $("diffbox").innerHTML =
+    `<b>Diff:</b> ${c.cNew} neu · ${c.cChanged} geändert · `
+    + `${c.cUnchanged} unverändert · ${c.cRemoved} entfernt`;
+  renderDiffAction();
+}
+
+// offene (ungewertete) neue + geänderte Texturen der Population — Menge von startRating(true).
+function flaggedOpenCount(){
+  return allTextures.filter(t=>
+    effectiveRatable(t) && t.rating == null && (t.flag === "new" || t.flag === "changed")
+  ).length;
+}
+// Kontextuelle Aktion in der Diff-Zeile: nur solange ein Diff angezeigt wird UND es offene
+// neue/geänderte Texturen gibt. Startet eine Session nur über diese Menge (startRating(true)).
+// Verschwindet, sobald die Markierungen zurückgesetzt sind (diffbox leer) oder nichts mehr offen.
+function renderDiffAction(){
+  const bar = $("statusbar");
+  let btn = $("diff-rate-flagged");
+  const diffShown = $("diffbox").innerHTML.trim() !== "";
+  const n = flaggedOpenCount();
+  if(!diffShown || n === 0){ if(btn) btn.remove(); return; }
+  if(!btn){
+    btn = document.createElement("button");
+    btn.id = "diff-rate-flagged";
+    btn.addEventListener("click", ()=> startRating(true));
+    bar.appendChild(btn);
+  }
+  btn.textContent = `Nur diese bewerten (${n})`;
+}
+
+// neu/geändert-Markierungen löschen
+async function clearFlags(){
+  const txs = await getAll("textures");
+  const upd = txs.filter(t=>t.flag != null && t.flag !== "removed");
+  upd.forEach(t=>t.flag = null);
+  await putAll("textures", upd);
+  $("diffbox").innerHTML = "";
+  await refresh();
+}
+
+/* ---------- Tier-Helfer + effektiver Wert ---------- */
+// Tier 0..9 in 10er-Schritten; unbewertet/<10 = 0, 90..100 = 9.
+function tierOf(rating){
+  const r = rating == null ? 0 : rating;
+  if(r <= 0) return 0;
+  return r >= 100 ? 9 : Math.floor(r / 10);
+}
+function isDecent(rating){ return (rating == null ? 0 : rating) >= 50; }
+// Einzige Wahrheit für den Wert einer Textur: aktuelles Rating, sonst 0.
+function effectiveRating(t){ return (t && t.rating != null) ? t.rating : 0; }
+// Session-XP-Wert: aktuelles Rating, sonst (re-uploadet) prevRating, sonst 0. Anders als
+// effectiveRating zählt eine geänderte Textur ihren alten Score, damit ein Mid-Session-Exclude
+// (rating bleibt null, prevRating bleibt erhalten) auf beiden Delta-Seiten gleich wiegt.
+function xpValue(t){ return t.rating != null ? t.rating : (t.prevRating != null ? t.prevRating : 0); }
+
+/* ---------- Rating-Event-Log + zentrale Rating-Setzung ---------- */
+// Append-only Log in settings["ratingEvents"]; sofort persistieren.
+async function logRatingEvent(t, oldVal, newVal){
+  const rec = await getOne("settings", "ratingEvents");
+  const events = rec ? rec.value : [];
+  events.push({
+    ts: new Date().toISOString(), date: localDay(new Date()), id: t.id, category: t.category,
+    old: oldVal, new: newVal, delta: newVal - oldVal,
+    crossedFifty: oldVal < 50 && newVal >= 50
+  });
+  await putOne("settings", {key:"ratingEvents", value:events});
+}
+// Rating per UI setzen. old = prevRating (bei geänderter Textur), sonst bisheriges
+// Rating, sonst 0. Event bei echter Änderung, Vergleich (prev*) auflösen, persistieren.
+async function applyRating(t, newRating){
+  const oldVal = t.prevRating != null ? t.prevRating
+               : (t.rating == null ? 0 : t.rating);
+  const newVal = newRating == null ? 0 : newRating;
+  t.rating = newRating;
+  t.prevRating = null;
+  t.prevDataUrl = null;
+  if(oldVal !== newVal){
+    await logRatingEvent(t, oldVal, newVal);
+    ratingsSinceExport++;                                 // Backup-Erinnerung speist sich daraus
+    await putOne("settings", {key:"ratingsSinceExport", value:ratingsSinceExport});
+  }
+  await putOne("textures", t);
+}
+
+/* ---------- Rendern ---------- */
+function renderCategories(cats, selected){
+  const box = $("categories");
+  box.innerHTML = "";
+  cats.forEach(c=>{
+    const label = document.createElement("label");
+    label.className = "cat";
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.value = c.name; cb.checked = selected.has(c.name);
+    cb.addEventListener("change", onCategoryToggle);
+    label.append(cb, ` ${c.name} (${c.count})`);
+    box.appendChild(label);
+  });
+}
+
+// Übersichts-Zustand (Cache + Filter)
+let allTextures = [];                 // alle Datensätze aus DB
+let selectedCats = new Set();         // Kategorie-Auswahl (Checkboxen, persistiert)
+let statusFilter = "all";             // all | rated | unrated
+let catFilter = "all";                // "all" oder Kategoriename
+let baseline = {};                    // { normPath: hash } aus Vanilla-Baseline
+let hideDefault = true;               // Standard-Texturen ausblenden (persistiert)
+let groups = [];                      // [{id,name,repId,memberIds:[]}] (persistiert)
+let groupByMember = new Map();        // textureId -> group (Lookup)
+let texById = new Map();              // textureId -> texture
+let groupMode = false;                // Auswahl-Modus zum Gruppieren
+let selectedTiles = new Set();        // ausgewählte textureIds im Gruppen-Modus
+let onlyReps = false;                 // Filter: nur Repräsentanten zeigen
+let groupPanelOpen = false;           // Gruppen-Panel sichtbar
+let sortMode = "low";                 // Sortierung: low | high (effectiveRating) | alpha (persistiert)
+let binFilter = null;                 // {min,max} aktiver Tier-Leiter-Bereichsfilter oder null
+let searchText = "";                  // Namensfilter aus der Suche (nicht persistiert)
+let foldersOpen = false;              // "Erfasste Ordner" ausgeklappt (persistiert)
+let achievementsUnlocked = new Set(); // freigeschaltete Erfolg-IDs (persistiert)
+let lastExportAt = null;              // ISO-Zeit des letzten Backups (persistiert)
+let ratingsSinceExport = 0;           // echte Wertänderungen seit letztem Backup (persistiert)
+
+// Sektion sortieren: alpha nach Name, sonst nach effectiveRating (auf-/absteigend),
+// Gleichstand nach Name. effectiveRating = rating ?? 0 -> Unbewertete sind 0.
+function sortList(list){
+  if(sortMode === "alpha")
+    return list.slice().sort((a,b)=>a.name.localeCompare(b.name));
+  const dir = sortMode === "low" ? 1 : -1;
+  return list.slice().sort((a,b)=>
+    dir * (effectiveRating(a) - effectiveRating(b)) || a.name.localeCompare(b.name));
+}
+
+// Übersicht aus bereits gefilterter Liste zeichnen
+function renderOverview(visible){
+  const root = $("overview");
+  root.innerHTML = "";
+  if(allTextures.length === 0){
+    root.innerHTML = '<p class="muted">Noch keine Daten — ZIP laden.</p>'; return;
+  }
+  if(visible.length === 0){
+    root.innerHTML = '<p class="muted">Keine Texturen für die aktuellen Filter.</p>'; return;
+  }
+  const byCat = {};
+  visible.forEach(t=>(byCat[t.category] ||= []).push(t));
+  Object.keys(byCat).sort().forEach(cat=>{
+    const list = sortList(byCat[cat]);
+    const sec = document.createElement("section");
+    const h = document.createElement("h2");
+    h.textContent = `${cat} (${list.length})`;
+    sec.appendChild(h);
+    const grid = document.createElement("div");
+    grid.className = "grid";
+    list.forEach(t=>{
+      const tile = document.createElement("div");
+      tile.className = "tile";
+      const g = groupByMember.get(t.id);
+      const nonRep = !!g && g.repId !== t.id;
+      if(g) tile.style.borderLeft = "4px solid " + groupColor(g.id);
+
+      const img = document.createElement("img");
+      img.src = t.dataUrl; img.alt = t.name; img.loading = "lazy";
+      const nm = document.createElement("div");
+      nm.className = "name"; nm.title = t.name;
+      nm.innerHTML = (g && g.repId === t.id ? '<span class="grep-star">★</span>' : "") + escapeHtml(t.name);
+      const rate = document.createElement("div");
+      rate.className = "rating" + (t.rating == null ? " unrated" : "");
+      rate.textContent = t.rating == null ? "ungewertet" : "★ " + t.rating;
+      tile.append(img, nm, rate);
+      if(g){
+        const lbl = document.createElement("div");
+        lbl.className = "glabel"; lbl.textContent = g.name; lbl.title = g.name;
+        tile.appendChild(lbl);
+      }
+
+      if(t.isDefault){
+        addBadge(tile, "default", "STANDARD");
+        tile.classList.add("std");
+        grid.appendChild(tile);
+        return;
+      }
+      // Diff-Badge (neu/geändert/entfernt)
+      if(t.flag === "new" || t.flag === "changed" || t.flag === "removed"){
+        addBadge(tile, t.flag, t.flag === "new" ? "NEU" : t.flag === "changed" ? "GEÄNDERT" : "ENTFERNT");
+        if(t.flag === "removed") tile.classList.add("removed");
+      }
+      if(isExcluded(t)){ addBadge(tile, "excluded", "AUSGESCHLOSSEN"); tile.classList.add("removed"); }
+      else if(nonRep){ addBadge(tile, "group", "GRUPPE"); tile.classList.add("grouped-nonrep"); }
+
+      if(groupMode){
+        // Auswahl statt inline bewerten
+        if(selectedTiles.has(t.id)) tile.classList.add("sel");
+        tile.addEventListener("click", ()=>{
+          if(selectedTiles.has(t.id)) selectedTiles.delete(t.id); else selectedTiles.add(t.id);
+          tile.classList.toggle("sel");
+          renderGroupBar();
+        });
+      }else{
+        // Schalter aus-/einschließen — nur Rep oder ungruppiert; Nicht-Rep bietet
+        // keine eigene exclude-Aktion (Gruppen-Status entscheidet der Rep).
+        if(!nonRep){
+          const ex = document.createElement("span");
+          ex.className = "exbtn" + (isExcluded(t) ? " on" : "");
+          ex.textContent = "⊘"; ex.title = "Nicht bewerten";
+          ex.addEventListener("click", e=>{ e.stopPropagation(); toggleExclude(t); });
+          tile.appendChild(ex);
+        }
+        // inline bewerten nur für bewertbare (nicht ausgeschlossen, kein Nicht-Rep)
+        if(!isExcluded(t) && !nonRep)
+          tile.addEventListener("click", ()=>openInlineEdit(tile, t));
+      }
+      grid.appendChild(tile);
+    });
+    sec.appendChild(grid);
+    root.appendChild(sec);
+  });
+}
+
+// Kachel in-place aktualisieren: das offene Eingabefeld zurück in den Rating-Text wandeln,
+// unrated-Klasse passend setzen. Spiegelt exakt das Rating-Markup aus renderOverview.
+function refreshTileRating(tile, t){
+  const inp = tile.querySelector("input.rate-edit");
+  if(!inp) return;
+  const rate = document.createElement("div");
+  rate.className = "rating" + (t.rating == null ? " unrated" : "");
+  rate.textContent = t.rating == null ? "ungewertet" : "★ " + t.rating;
+  inp.replaceWith(rate);
+}
+
+// Inline-Eingabe 1–100 in einer Kachel; sofort speichern
+function openInlineEdit(tile, t){
+  if(tile.querySelector("input")) return;        // schon offen
+  const rate = tile.querySelector(".rating");
+  const inp = document.createElement("input");
+  inp.type = "text"; inp.inputMode = "numeric"; inp.maxLength = 3; inp.className = "rate-edit";
+  inp.value = t.rating == null ? "" : t.rating;
+  rate.replaceWith(inp);
+  inp.focus(); inp.select();
+  let done = false;
+  const commit = async save=>{
+    if(done) return; done = true;
+    if(save){
+      const raw = inp.value.trim();
+      let val = t.rating;                                // unverändert, falls ungültig
+      if(raw === ""){ val = null; }                      // leer -> wieder ungewertet
+      else { const n = Math.min(100, Math.max(1, Math.round(Number(raw))));
+             if(Number.isFinite(n)) val = n; }
+      await applyRating(t, val);                          // Event + sofort persistieren
+    }
+    // Kein voller Rebuild: nur die Kachel in-place + die billigen Kopf-Widgets. Bei sortMode
+    // low/high kann sich die Position ändern — die Kachel bleibt bis zum nächsten vollen
+    // Rebuild an Ort.
+    refreshTileRating(tile, t);
+    renderHero(); renderLadder(); renderRateBadge();
+  };
+  inp.addEventListener("input", ()=>{ inp.value = inp.value.replace(/[^0-9]/g, ""); });
+  inp.addEventListener("keydown", e=>{
+    e.stopPropagation();
+    if(e.key === "Enter") commit(true);
+    else if(e.key === "Escape") commit(false);
+  });
+  inp.addEventListener("blur", ()=>commit(true));
+}
+
+// Badge in Container oben rechts stapeln
+function badgesEl(tile){
+  let c = tile.querySelector(".badges");
+  if(!c){ c = document.createElement("div"); c.className = "badges"; tile.appendChild(c); }
+  return c;
+}
+function addBadge(tile, cls, text){
+  const b = document.createElement("span");
+  b.className = "badge " + cls; b.textContent = text;
+  badgesEl(tile).appendChild(b);
+}
+
+// Floating-Leiste im Gruppen-Modus
+function renderGroupBar(){
+  const bar = $("groupbar");
+  if(!groupMode){ bar.hidden = true; return; }
+  bar.hidden = false; bar.innerHTML = "";
+  const info = document.createElement("span");
+  info.textContent = selectedTiles.size + " ausgewählt";
+  const neu = document.createElement("button"); neu.textContent = "Neue Gruppe";
+  neu.addEventListener("click", onNewGroup);
+  const add = document.createElement("button"); add.textContent = "Zu Gruppe hinzufügen";
+  add.addEventListener("click", onAddToGroup);
+  const cancel = document.createElement("button"); cancel.textContent = "Abbrechen";
+  cancel.addEventListener("click", ()=>{ selectedTiles.clear(); groupMode = false; renderFilters(); renderAll(); });
+  bar.append(info, neu, add, cancel);
+}
+async function onNewGroup(){
+  if(selectedTiles.size < 2){ alert("Mindestens 2 Texturen auswählen."); return; }
+  const name = prompt("Gruppenname:", "Neue Gruppe");
+  if(name === null) return;
+  const ids = [...selectedTiles];
+  groups.push({ id: genId(), name: name.trim() || "Gruppe", repId: ids[0], memberIds: ids });
+  selectedTiles.clear(); groupMode = false;
+  await persistGroups(); renderFilters(); renderAll();
+}
+async function onAddToGroup(){
+  if(selectedTiles.size === 0){ alert("Nichts ausgewählt."); return; }
+  if(groups.length === 0){ alert("Keine Gruppe vorhanden."); return; }
+  const list = groups.map((g,i)=>`${i+1}: ${g.name}`).join("\n");
+  const pick = prompt("Zu welcher Gruppe? Nummer eingeben:\n" + list);
+  if(pick === null) return;
+  const g = groups[Number(pick) - 1];
+  if(!g){ alert("Ungültige Nummer."); return; }
+  selectedTiles.forEach(id=>{ if(!g.memberIds.includes(id)) g.memberIds.push(id); });
+  selectedTiles.clear(); groupMode = false;
+  await persistGroups(); renderFilters(); renderAll();
+}
+
+// Gruppen-Panel: umbenennen, Rep wechseln, Mitglied entfernen, auflösen
+function renderGroupPanel(){
+  const p = $("grouppanel");
+  if(!groupPanelOpen){ p.hidden = true; return; }
+  p.hidden = false; p.innerHTML = "";
+  const h = document.createElement("h2");
+  h.textContent = `Gruppen (${groups.length})`;
+  p.appendChild(h);
+  if(groups.length === 0){
+    const e = document.createElement("p"); e.className = "muted"; e.textContent = "Keine Gruppen.";
+    p.appendChild(e); return;
+  }
+  groups.forEach(g=>{
+    const card = document.createElement("div");
+    card.className = "gcard";
+    card.style.borderLeft = "4px solid " + groupColor(g.id);
+    const head = document.createElement("div"); head.className = "ghead";
+    const nameInp = document.createElement("input");
+    nameInp.className = "gname"; nameInp.value = g.name;
+    nameInp.addEventListener("change", async ()=>{
+      g.name = nameInp.value.trim() || g.name;
+      await persistGroups(); renderAll();
+    });
+    const dissolve = document.createElement("button");
+    dissolve.className = "danger"; dissolve.textContent = "Auflösen";
+    dissolve.addEventListener("click", async ()=>{
+      groups = groups.filter(x=>x.id !== g.id);
+      await persistGroups(); renderAll();
+    });
+    head.append(nameInp, dissolve);
+    const mwrap = document.createElement("div"); mwrap.className = "gmembers";
+    g.memberIds.forEach(id=>{
+      const t = texById.get(id); if(!t) return;
+      const thumb = document.createElement("div");
+      thumb.className = "gthumb" + (g.repId === id ? " rep" : "");
+      const im = document.createElement("img"); im.src = t.dataUrl; im.title = t.name;
+      thumb.appendChild(im);
+      if(g.repId === id){
+        const st = document.createElement("span"); st.className = "gstar"; st.textContent = "★";
+        thumb.appendChild(st);
+      }
+      const x = document.createElement("span"); x.className = "gx"; x.textContent = "×";
+      x.title = "Mitglied entfernen";
+      x.addEventListener("click", async e=>{
+        e.stopPropagation();
+        g.memberIds = g.memberIds.filter(m=>m !== id);
+        await persistGroups(); renderAll();
+      });
+      thumb.appendChild(x);
+      thumb.addEventListener("click", async ()=>{   // Mitglied = neuer Repräsentant
+        g.repId = id; await persistGroups(); renderAll();
+      });
+      mwrap.appendChild(thumb);
+    });
+    card.append(head, mwrap);
+    p.appendChild(card);
+  });
+}
+
+// Kennzahlen-Hero: Ø gesamt groß (Teal + Glow) + vier Sekundärkennzahlen.
+// Basis = Population (dashPopulation), gleiche Berechnungen wie Dashboard.
+function renderHero(){
+  const box = $("hero");
+  if(allTextures.length === 0){
+    box.className = "empty";
+    box.innerHTML = "Noch keine Daten — ZIP über das Fenster ziehen oder oben „ZIP laden“.";
+    return;
+  }
+  box.className = "";
+  const pop = dashPopulation();
+  const rated  = pop.filter(t=> t.rating != null);
+  const decent = pop.filter(t=> effectiveRating(t) >= 50);
+  const avg = a=> a.length ? (a.reduce((s,t)=>s+t.rating, 0) / a.length).toFixed(1) : "–";
+  const ratedPct  = pop.length ? Math.round(rated.length  / pop.length * 100) : 0;
+  const decentPct = pop.length ? Math.round(decent.length / pop.length * 100) : 0;
+  // Schnitte der aktiven Kategorien (selectedCats) als Werteliste
+  const byCat = {};
+  pop.forEach(t=>{ if(selectedCats.has(t.category)) (byCat[t.category] ||= []).push(t); });
+  const catRows = Object.keys(byCat).sort().map(c=>{
+    const r = byCat[c].filter(t=>t.rating != null);
+    return `<div class="hero-cat"><span class="k">${c}</span><span class="v">${avg(r)}</span></div>`;
+  }).join("") || `<div class="hero-cat"><span class="k">keine aktiven Kategorien</span></div>`;
+  box.innerHTML = `
+    <div class="hero-avg">
+      <div class="lab">Durchschnitt gesamt</div>
+      <div class="val">${avg(rated)}</div>
+    </div>
+    <div class="hero-divider"></div>
+    <div class="hero-sec">
+      <div class="hero-metric">
+        <div class="lab">Bewertet</div>
+        <div class="num">${rated.length} <small>/ ${pop.length}</small></div>
+        <div class="hero-bar blue"><div style="width:${ratedPct}%"></div></div>
+      </div>
+      <div class="hero-metric">
+        <div class="lab">Durchgespielt (50+)</div>
+        <div class="num">${decent.length} <small>/ ${pop.length}</small></div>
+        <div class="hero-bar teal"><div style="width:${decentPct}%"></div></div>
+      </div>
+      <div class="hero-cats">${catRows}</div>
+    </div>`;
+}
+
+// Filterleiste in vier Cluster: Status · Selektoren · Sichtbarkeit · Gruppen, Suche rechts.
+function renderFilters(){
+  const bar = $("filterbar");
+  bar.innerHTML = "";
+  $("categories").hidden = !foldersOpen;
+  if(allTextures.length === 0) return;
+  const cluster = (...els)=>{ const d = document.createElement("div"); d.className = "fcluster"; d.append(...els); return d; };
+  const divider = ()=>{ const d = document.createElement("div"); d.className = "fdiv"; return d; };
+
+  /* --- Cluster 1: Status (genau einer aktiv) --- */
+  const seg = document.createElement("div"); seg.className = "seg";
+  [["all","Alle"],["rated","Bewertet"],["unrated","Unbewertet"],
+   ["new","Neu"],["changed","Geändert"]].forEach(([v,lbl])=>{
+    const b = document.createElement("button");
+    b.className = "segbtn" + (statusFilter === v ? " active" : "");
+    b.textContent = lbl;
+    b.addEventListener("click", ()=>{ statusFilter = v; binFilter = null; renderFilters(); renderAll(); });
+    seg.appendChild(b);
+  });
+
+  /* --- Cluster 2: Selektoren (Erfasste Ordner, Sortierung, Kategorien) --- */
+  const foldersBtn = document.createElement("button");
+  foldersBtn.textContent = "Erfasste Ordner";
+  if(foldersOpen) foldersBtn.classList.add("active");
+  foldersBtn.addEventListener("click", async ()=>{
+    foldersOpen = !foldersOpen;
+    await putOne("settings", {key:"foldersOpen", value:foldersOpen});
+    renderFilters();
+  });
+  const sortSel = document.createElement("select");
+  sortSel.id = "sortmode";
+  [["low","niedrigste zuerst"],["high","höchste zuerst"],["alpha","alphabetisch"]]
+    .forEach(([v,lbl])=> sortSel.add(new Option(lbl, v)));
+  sortSel.value = sortMode;
+  sortSel.addEventListener("change", async ()=>{
+    sortMode = sortSel.value;
+    await putOne("settings", {key:"sortMode", value:sortMode});
+    binFilter = null; renderAll();
+  });
+  const catSel = document.createElement("select");
+  catSel.id = "catfilter";
+  catSel.add(new Option("Alle Kategorien", "all"));
+  [...selectedCats].sort().forEach(c=>catSel.add(new Option(c, c)));
+  catFilter = [...catSel.options].some(o=>o.value === catFilter) ? catFilter : "all";
+  catSel.value = catFilter;
+  catSel.addEventListener("change", ()=>{ catFilter = catSel.value; binFilter = null; renderAll(); });
+
+  /* --- Cluster 3: Sichtbarkeit (Standard-Texturen anzeigen) --- */
+  const stdLabel = document.createElement("label"); stdLabel.className = "fcheck";
+  const stdCb = document.createElement("input");
+  stdCb.type = "checkbox"; stdCb.checked = !hideDefault;       // Haken an = Defaults sichtbar
+  stdCb.addEventListener("change", async ()=>{
+    hideDefault = !stdCb.checked;
+    await putOne("settings", {key:"hideDefault", value:hideDefault});
+    binFilter = null; renderAll();
+  });
+  stdLabel.append(stdCb, " Standard-Texturen anzeigen");
+
+  /* --- Cluster 4: Gruppen (Split-Control + Gruppieren) --- */
+  const split = document.createElement("div"); split.className = "split";
+  const openBtn = document.createElement("button"); openBtn.id = "grp-open-btn"; openBtn.textContent = "Gruppen";
+  openBtn.addEventListener("click", ()=>{ groupPanelOpen = !groupPanelOpen; renderGroupPanel(); });
+  const gmenu = document.createElement("details"); gmenu.className = "menu";
+  const gsum = document.createElement("summary"); gsum.textContent = "▾";
+  const gpop = document.createElement("div"); gpop.className = "menu-pop grp-pop";
+
+  const repLabel = document.createElement("label"); repLabel.className = "menu-item";
+  const repCb = document.createElement("input"); repCb.type = "checkbox"; repCb.checked = onlyReps;
+  repCb.addEventListener("change", ()=>{ onlyReps = repCb.checked; renderAll(); });
+  repLabel.append(repCb, " Nur Repräsentanten anzeigen");
+
+  const sugBtn = document.createElement("button"); sugBtn.className = "menu-item";
+  sugBtn.textContent = "Vorschläge ergänzen";
+  sugBtn.addEventListener("click", ()=>{ gmenu.open = false; suggestGroups(); });
+
+  const sep = document.createElement("div"); sep.className = "menu-sep";
+
+  const clearBtn = document.createElement("button"); clearBtn.className = "menu-item";
+  clearBtn.textContent = "Markierungen zurücksetzen";
+  clearBtn.addEventListener("click", ()=>{ gmenu.open = false; clearFlags(); });
+
+  gpop.append(repLabel, sugBtn, sep, clearBtn);
+  gmenu.append(gsum, gpop);
+  split.append(openBtn, gmenu);
+
+  const groupBtn = document.createElement("button");
+  groupBtn.textContent = groupMode ? "Gruppieren: AN" : "Gruppieren";
+  if(groupMode) groupBtn.classList.add("active");
+  groupBtn.addEventListener("click", ()=>{ groupMode = !groupMode; selectedTiles.clear(); renderFilters(); renderAll(); });
+
+  /* --- Suche, rechtsbündig zur Verteilungs-Kante --- */
+  const search = document.createElement("input");
+  search.type = "search"; search.id = "tsearch"; search.placeholder = "Suchen …";
+  search.value = searchText;
+  search.addEventListener("input", ()=>{ searchText = search.value.trim().toLowerCase(); renderAll(); });
+  const searchWrap = document.createElement("div"); searchWrap.className = "fcluster fsearch";
+  searchWrap.appendChild(search);
+
+  bar.append(
+    cluster(seg), divider(),
+    cluster(foldersBtn, sortSel, catSel), divider(),
+    cluster(stdLabel), divider(),
+    cluster(split, groupBtn),
+    searchWrap
+  );
+}
+
+// sichtbare Menge berechnen, Stats + Übersicht zeichnen
+function matchStatus(t){
+  switch(statusFilter){
+    case "rated":   return t.rating != null;
+    case "unrated": return t.rating == null;
+    case "new":     return t.flag === "new";
+    case "changed": return t.flag === "changed";
+    default:        return true;            // "all"
+  }
+}
+// Struktur-Filter (Kategorie, Standard, Repräsentanten) ohne Status/Bin.
+// Gemeinsame Basis für Übersicht UND Tier-Leiter.
+function structuralMatch(t){
+  return selectedCats.has(t.category) &&
+    (catFilter === "all" || t.category === catFilter) &&
+    (!hideDefault || !t.isDefault) &&
+    (!onlyReps || !isGroupedNonRep(t));
+}
+// Bereichsfilter aus der Tier-Leiter: nur Ratings im Bereich.
+function binMatch(t){
+  if(!binFilter) return true;
+  return t.rating != null && t.rating >= binFilter.min && t.rating <= binFilter.max;
+}
+// Namensfilter aus der Suche (Teilstring, case-insensitive). Leer = kein Filter.
+function searchMatch(t){
+  return searchText === "" || t.name.toLowerCase().includes(searchText);
+}
+function renderAll(){
+  const visible = allTextures.filter(t=>
+    structuralMatch(t) && matchStatus(t) && binMatch(t) && searchMatch(t)
+  );
+  renderHero();
+  renderLadder();
+  renderOverview(visible);
+  renderGroupBar();
+  renderGroupPanel();
+  renderRateBadge();
+  renderDiffAction();
+  if(!$("view-dashboard").hidden) renderDashboard();
+}
+
+// Tier-Leiter: feste Stufen, oben nach unten. Trennlinie nach 50–59 (Zielmarke).
+const LADDER_TIERS = [
+  {label:"90+",   min:90, max:100, color:"#0F6E56"},
+  {label:"80–89", min:80, max:89,  color:"#1D9E75"},
+  {label:"70–79", min:70, max:79,  color:"#5DCAA5"},
+  {label:"60–69", min:60, max:69,  color:"#5DCAA5"},
+  {label:"50–59", min:50, max:59,  color:"#9FE1CB"},
+  {label:"40–49", min:40, max:49,  color:"#EF9F27"},
+  {label:"30–39", min:30, max:39,  color:"#EF9F27"},
+  {label:"20–29", min:20, max:29,  color:"#E24B4A"},
+  {label:"<20",   min:0,  max:19,  color:"#E24B4A"},
+];
+const LADDER_DIVIDER_AFTER = 4;               // Trennlinie nach 50–59
+
+// Population exakt wie die Durchschnitte: nur Repräsentanten, kein Default,
+// kein rateOverride "exclude", nur tatsächlich bewertet. Status-Filter zählt mit,
+// eigener Bereichsfilter (binFilter) NICHT -> Leiter zeigt immer alle Stufen.
+function ladderBase(){
+  return allTextures.filter(t=>
+    structuralMatch(t) && matchStatus(t) && effectiveRatable(t) && t.rating != null
+  );
+}
+function tierActive(tier){
+  return binFilter && binFilter.min === tier.min && binFilter.max === tier.max;
+}
+// Tier-Leiter nur in der Bewerten-Übersicht (#tierladder). Klick filtert binFilter.
+function renderLadder(){
+  const box = $("tierladder");
+  if(allTextures.length === 0){ box.innerHTML = ""; return; }
+  const data = ladderBase();
+  const counts = LADDER_TIERS.map(tier=>
+    data.filter(t=> t.rating >= tier.min && t.rating <= tier.max).length
+  );
+  const max = Math.max(1, ...counts);
+  box.innerHTML = "";
+
+  const head = document.createElement("div");
+  head.className = "tl-head";
+  const title = document.createElement("span");
+  title.innerHTML = `Rating-Verteilung <span class="muted">(${data.length} bewertet)</span>`;
+  head.appendChild(title);
+  if(binFilter){
+    const active = LADDER_TIERS.find(tierActive);
+    const reset = document.createElement("button");
+    reset.className = "tl-reset";
+    reset.textContent = `Filter ${active ? active.label : binFilter.min+"–"+binFilter.max} zurücksetzen`;
+    reset.addEventListener("click", ()=>{ binFilter = null; renderAll(); });
+    head.appendChild(reset);
+  }
+  box.appendChild(head);
+
+  // schwebende Box an der Maus
+  const tip = document.createElement("div");
+  tip.className = "tl-tip";
+  box.appendChild(tip);
+
+  const rows = document.createElement("div");
+  rows.className = "tl-rows";
+  LADDER_TIERS.forEach((tier, i)=>{
+    const n = counts[i];
+    const row = document.createElement("div");
+    row.className = "tl-row" + (tierActive(tier) ? " active" : "");
+
+    const label = document.createElement("span");
+    label.className = "tl-label"; label.textContent = tier.label;
+
+    const track = document.createElement("div");
+    track.className = "tl-track";
+    const fill = document.createElement("div");
+    fill.className = "tl-fill";
+    fill.style.width = (n / max * 100) + "%";
+    fill.style.background = tier.color;
+    track.appendChild(fill);
+
+    const count = document.createElement("span");
+    count.className = "tl-count"; count.textContent = n;
+
+    row.append(label, track, count);
+    row.addEventListener("mouseenter", ()=>{
+      tip.textContent = `Stufe ${tier.label}: ${n} Texturen, klick filtert`;
+      tip.style.display = "block";
+    });
+    row.addEventListener("mousemove", e=>{
+      tip.style.left = (e.clientX + 14) + "px";
+      tip.style.top  = (e.clientY + 14) + "px";
+    });
+    row.addEventListener("mouseleave", ()=>{ tip.style.display = "none"; });
+    row.addEventListener("click", ()=>{
+      // gleiche Stufe erneut -> Filter aus, sonst Übersicht auf diese Stufe
+      if(tierActive(tier)) binFilter = null;
+      else binFilter = {min:tier.min, max:tier.max};
+      renderAll();
+    });
+    rows.appendChild(row);
+
+    if(i === LADDER_DIVIDER_AFTER){
+      const div = document.createElement("div");
+      div.className = "tl-divider";
+      rows.appendChild(div);
+    }
+  });
+  box.appendChild(rows);
+
+  const caption = document.createElement("div");
+  caption.className = "tl-caption";
+  caption.textContent = "Linie bei 50 ist dein Ziel. Alles darunter ist die Arbeits-Queue.";
+  box.appendChild(caption);
+}
+
+/* ---------- Dashboard: Level-System ---------- */
+const XP_PER_LEVEL = 700;                       // feste XP-Schwelle je Level
+const EXPORT_REMINDER_AFTER = 200;              // ab so vielen Bewertungen seit Backup erinnern
+const RANK_NAMES = ["Holz","Stein","Bronze","Eisen","Gold","Redstone","Lapis",
+                    "Smaragd","Amethyst","Diamant","Netherit"];   // Index 0..9 = Level 0..99, 10 = Netherit ab 100
+const RANK_COLORS = ["#9c6b3f","#9aa0ab","#cd7f32","#cdd2da","#ffcc44","#e24b4a",
+                     "#3a6ea5","#1d9e75","#9b6dd6","#5fd0e6","#7d6b78"];
+const HEAT_WEEKS = 15;                           // Spalten der Heatmap
+const HEAT_COLORS = ["", "#9FE1CB", "#5DCAA5", "#1D9E75", "#0F6E56"];  // Stufe 0 = neutraler Track
+
+// Population exakt wie Durchschnitt + Tier-Leiter: Repräsentanten, kein Default, kein exclude.
+function dashPopulation(){ return allTextures.filter(effectiveRatable); }
+
+// Bonus: 20 XP je bewertetem Nicht-Repräsentanten einer Gruppe. Mitglieder zählen
+// sonst nicht zur Population — diese Quelle würdigt ihre Arbeit. "texturiert" = rating != null.
+// Konstant während einer Session (Nicht-Reps werden nie in einer Session bewertet, Gruppen
+// nicht währenddessen gebildet) -> Session-Delta bleibt rein texturbezogen, solange der
+// Snapshot den Bonus mitzählt (s. startRating).
+const GROUP_BONUS_PER_MEMBER = 20;
+function groupBonusXP(){
+  let n = 0;
+  for(const g of groups){
+    for(const id of g.memberIds){
+      if(id === g.repId) continue;
+      const t = texById.get(id);
+      if(t && !t.isDefault && t.rating != null) n++;
+    }
+  }
+  return n * GROUP_BONUS_PER_MEMBER;
+}
+// XP-Quellen: Score-Summe der Population + Gruppen-Bonus -> rückwirkend zählt alle Arbeit.
+function xpSources(pop){
+  const scoreSum = pop.reduce((s,t)=> s + effectiveRating(t), 0);
+  return scoreSum + groupBonusXP();
+}
+function levelInfo(pop){
+  const totalXP   = Array.isArray(pop) ? xpSources(pop) : pop;   // Population oder roher XP-Wert
+  const level     = Math.floor(totalXP / XP_PER_LEVEL);
+  const xpInLevel = totalXP - level * XP_PER_LEVEL;
+  const progress  = xpInLevel / XP_PER_LEVEL;
+  const rankIndex = Math.min(10, Math.floor(level / 10));
+  return {totalXP, level, xpInLevel, progress, rankIndex};
+}
+
+const fmtNum = n => Math.round(n).toLocaleString("de-DE");   // Tausenderpunkt
+
+/* ---------- Streak-Icons (Tabler-Outline, dunkles Theme) ---------- */
+const ICON_FLAME = `<svg class="sf-ico" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 12c2 -2.96 0 -7 -1 -8c0 3.038 -1.773 4.741 -3 6c-1.226 1.26 -2 3.24 -2 5a6 6 0 1 0 12 0c0 -1.532 -1.056 -3.94 -2 -5c-1.786 3 -2.791 3 -4 2z"/></svg>`;
+const ICON_MEDAL = `<svg class="sf-ico" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9" r="6"/><path d="M9 14.2v6.8l3 -1.5l3 1.5v-6.8"/></svg>`;
+const ICON_TROPHY = `<svg class="sf-ico" viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21l8 0"/><path d="M12 17l0 4"/><path d="M7 4l10 0"/><path d="M17 4v8a5 5 0 0 1 -10 0v-8"/><path d="M5 9m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0"/><path d="M19 9m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0"/></svg>`;
+
+/* ---------- Web Audio (synthetisch) ---------- */
+// AudioContext bei erster Geste erzeugen; bei suspended resumen. Blockiert -> lautlos.
+function ensureAudio(){
+  try{
+    if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if(audioCtx.state === "suspended") audioCtx.resume();
+  }catch{ audioCtx = null; }
+  return audioCtx;
+}
+// MARKER Sound-Hook: später echte Dateien hier einhängen, z.B.
+//   function playSample(name){ new Audio(`sfx/${name}.mp3`).play(); }
+// und soundLevelUp/soundRankUp auf playSample(...) umstellen — gleiche Aufrufstelle.
+function synthTone(freq, start, dur, type, gain){
+  const ac = audioCtx; if(!ac) return;
+  const o = ac.createOscillator(), g = ac.createGain();
+  o.type = type || "triangle"; o.frequency.value = freq;
+  o.connect(g); g.connect(ac.destination);
+  const t = ac.currentTime + start;
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(gain || 0.16, t + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.start(t); o.stop(t + dur + 0.03);
+}
+function soundLevelUp(){
+  if(!ensureAudio()) return;
+  [660, 990, 1320].forEach((f,i)=> synthTone(f, i*0.06, 0.18, "triangle", 0.15));
+}
+function soundRankUp(){
+  if(!ensureAudio()) return;
+  [523, 659, 784].forEach(f=> synthTone(f, 0, 0.5, "triangle", 0.17));
+  synthTone(1046, 0.08, 0.4, "triangle", 0.11);
+  synthTone(1568, 0.16, 0.4, "triangle", 0.09);
+}
+// Laufender Swoosh während die XP-Leiste steigt: tiefpassgefiltertes Rauschen,
+// Filterfrequenz + Lautstärke folgen der Füllgeschwindigkeit (update(speed), 0..1).
+// up=false -> gedämpfter, tieferer Swoosh ohne Jubeltöne. Audio blockiert -> null.
+function startSwoosh(up){
+  const ac = ensureAudio(); if(!ac) return null;
+  const buf = ac.createBuffer(1, ac.sampleRate * 1.5, ac.sampleRate);
+  const data = buf.getChannelData(0);
+  for(let i=0;i<data.length;i++) data[i] = Math.random()*2 - 1;
+  const src = ac.createBufferSource(); src.buffer = buf; src.loop = true;
+  const filter = ac.createBiquadFilter();
+  filter.type = "lowpass"; filter.frequency.value = up ? 1000 : 450;
+  const g = ac.createGain(); g.gain.value = 0.0001;
+  src.connect(filter); filter.connect(g); g.connect(ac.destination);
+  try{ src.start(); }catch{ return null; }
+  const fMin = up ? 240 : 150, fMax = up ? 2200 : 900, gMax = up ? 0.06 : 0.035;
+  return {
+    update(speed){
+      const s = Math.max(0, Math.min(1, speed));
+      const t = ac.currentTime;
+      filter.frequency.setTargetAtTime(fMin + (fMax - fMin) * s, t, 0.03);
+      g.gain.setTargetAtTime(Math.max(0.0001, gMax * s), t, 0.03);
+    },
+    stop(){
+      const t = ac.currentTime;
+      g.gain.setTargetAtTime(0.0001, t, 0.08);
+      try{ src.stop(t + 0.35); }catch{}
+    }
+  };
+}
+
+/* ---------- XP-Animation (CS-Stil) ---------- */
+const easeOutExpo = p => p >= 1 ? 1 : 1 - Math.pow(2, -10*p);   // schnell raus, kriecht ins Ziel
+const easeDamped  = p => 1 - Math.pow(1 - p, 3);                // gedämpft (Minus)
+function tween(dur, ease, step){
+  return new Promise(res=>{
+    if(dur <= 0){ step(1); res(); return; }
+    const t0 = performance.now();
+    (function frame(now){
+      const p = Math.min(1, (now - t0) / dur);
+      step(ease(p));
+      if(p < 1) requestAnimationFrame(frame); else res();
+    })(performance.now());
+  });
+}
+function statusAt(xp){
+  const level = Math.floor(xp / XP_PER_LEVEL);
+  return { level, progress: (xp - level*XP_PER_LEVEL) / XP_PER_LEVEL };
+}
+function setPanel(level, widthPct, totalXP){
+  const num = $("sp-level-num"); if(num) num.textContent = level;
+  const fill = $("sp-xpfill"); if(fill) fill.style.width = Math.max(0, Math.min(100, widthPct)) + "%";
+  const xpInLevel = Math.round(totalXP - level*XP_PER_LEVEL);
+  const pr = $("sp-xp-primary"); if(pr) pr.textContent = `${fmtNum(xpInLevel)} / ${XP_PER_LEVEL}`;
+  const nx = $("sp-xp-next");    if(nx) nx.textContent = `bis Level ${level+1}`;
+  const tot = $("sp-xp-total");  if(tot) tot.textContent = `gesamt ${fmtNum(totalXP)} XP`;
+}
+// Rangfarbe als gedämpfter Tint (für aktiven Leiter-Schritt)
+function rankTint(hex){
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${n>>16},${(n>>8)&255},${n&255},.18)`;
+}
+// Rangleiter-Segmente; aktiver Rang mit Rangfarbe-Tint + farbigem Rahmen.
+function rankSegsHtml(curIdx){
+  return RANK_NAMES.map((nm,i)=>{
+    const cls = i < curIdx ? "done" : i === curIdx ? "cur" : "future";
+    const style = i === curIdx
+      ? `border-color:${RANK_COLORS[i]}; color:${RANK_COLORS[i]}; background-color:${rankTint(RANK_COLORS[i])}`
+      : "";
+    return `<div class="sp-rankseg ${cls}" style="${style}">${nm}</div>`;
+  }).join("");
+}
+// Status-Hero (Punkt 2): identisch in Dashboard und Abschluss.
+// snap (snapshotXP) optional: nur im Abschluss uebergeben -> Bewegungs-Caption unterm Balken.
+function statusHeroHtml(li, snap){
+  let captionHtml = "";
+  if(snap != null){
+    const before = levelInfo(snap);
+    const delta  = li.totalXP - snap;
+    captionHtml = before.level < li.level
+      ? `<div class="sp-xp-caption"><span class="cap-delta">+${fmtNum(delta)}</span> XP diese Session</div>`
+      : `<div class="sp-xp-caption">vorher ${fmtNum(before.xpInLevel)}, jetzt ${fmtNum(li.xpInLevel)}`
+        + ` <span class="cap-delta">+${fmtNum(delta)}</span></div>`;
+  }
+  return `
+    <div class="status-panel" id="status-panel-el">
+      <div class="sp-tag">Status</div>
+      <div class="sp-top">
+        <div class="sp-level"><b id="sp-level-num">${li.level}</b><span>Level</span></div>
+        <div class="sp-rank" id="sp-rank" style="color:${RANK_COLORS[li.rankIndex]}">
+          ${RANK_NAMES[li.rankIndex]}<small>Rang</small></div>
+      </div>
+      <div class="sp-xp">
+        <div class="sp-xpbar"><div class="sp-xpfill" id="sp-xpfill" style="width:${(li.progress*100).toFixed(1)}%"></div></div>
+        <div class="sp-xpnums">
+          <span class="sp-xp-primary" id="sp-xp-primary">${fmtNum(li.xpInLevel)} / ${XP_PER_LEVEL}</span>
+          <span class="sp-xp-next" id="sp-xp-next">bis Level ${li.level+1}</span>
+          <span class="sp-xp-total" id="sp-xp-total">gesamt ${fmtNum(li.totalXP)} XP</span>
+        </div>
+        ${captionHtml}
+      </div>
+      <div class="sp-ranks" id="sp-ranks">${rankSegsHtml(li.rankIndex)}</div>
+    </div>`;
+}
+function updateRank(level){
+  const idx = Math.min(10, Math.floor(level/10));
+  const rk = $("sp-rank");
+  if(rk){ rk.style.color = RANK_COLORS[idx]; rk.innerHTML = `${RANK_NAMES[idx]}<small>Rang</small>`; }
+  const box = $("sp-ranks");
+  if(box) box.innerHTML = rankSegsHtml(idx);
+}
+function flashClass(el, cls, ms){
+  if(!el) return;
+  el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls);
+  setTimeout(()=> el.classList.remove(cls), ms);
+}
+function fxLevelUp(newLevel, rankUp){
+  flashClass($("sp-level-num"), rankUp ? "rankpulse" : "lvlpulse", rankUp ? 650 : 420);
+  flashClass($("status-panel-el"), rankUp ? "rankflash" : "lvlflash", rankUp ? 850 : 520);
+  if(rankUp){ updateRank(newLevel); soundRankUp(); }   // Rang-Up: Farbe + Akkord
+  else soundLevelUp();                                  // Level-Up: Dreiklang
+}
+function fxLevelDown(newLevel){
+  flashClass($("sp-level-num"), "lvldown", 420);
+  updateRank(newLevel);
+}
+// Segmentweise von fromXP -> toXP, an jeder Levelgrenze Level-Up, Balken auf 0.
+async function animateStatus(fromXP, toXP){
+  const panel = $("status-panel-el"); if(!panel) return;
+  const XPL = XP_PER_LEVEL;
+  if(Math.abs(toXP - fromXP) < 1){
+    lastShownXP = toXP; await putOne("settings", {key:"lastShownXP", value:toXP}); return;
+  }
+  const up = toXP > fromXP;
+  const segs = [];
+  if(up){
+    let x = fromXP;
+    while(true){
+      const band = Math.floor(x / XPL);
+      const nb = (band+1) * XPL;
+      if(nb <= toXP){ segs.push({band, from:x, to:nb, levelup:true}); x = nb; if(x === toXP) break; }
+      else { segs.push({band, from:x, to:toXP, levelup:false}); break; }
+    }
+  }else{
+    let x = fromXP;
+    while(x > toXP){
+      let band = Math.floor(x / XPL);
+      if(band*XPL === x) band -= 1;
+      const lb = band * XPL;
+      if(lb > toXP){ segs.push({band, from:x, to:lb, leveldown:true}); x = lb; }
+      else { segs.push({band, from:x, to:toXP, leveldown:false}); break; }
+    }
+  }
+  // Dauer: ~1000ms je volles Level, ~600ms Teilstück. >10 Level -> auf ~12s stauchen.
+  const fullSegs = segs.filter(s=> s.levelup || s.leveldown).length;
+  const hasPartial = segs.some(s=> !s.levelup && !s.leveldown);
+  const total = fullSegs*1000 + (hasPartial ? 600 : 0);
+  const scale = fullSegs > 10 ? Math.min(1, 12000 / total) : 1;
+  const totalSec = Math.max(0.2, total*scale / 1000);
+
+  const startLevel = segs[0].band;
+  updateRank(startLevel);
+  setPanel(startLevel, (fromXP - startLevel*XPL) / XPL * 100, fromXP);
+
+  // Swoosh läuft über die ganze Animation, Tonhöhe folgt der Füllgeschwindigkeit.
+  const swoosh = startSwoosh(up);
+  let lastG = 0, lastT = performance.now();
+  try{
+    for(const seg of segs){
+      const full = seg.levelup || seg.leveldown;
+      const dur = (full ? 1000 : 600) * scale;
+      const ease = up ? easeOutExpo : easeDamped;
+      const band = seg.band;
+      await tween(dur, ease, e=>{
+        const cur = seg.from + (seg.to - seg.from) * e;
+        setPanel(band, (cur - band*XPL) / XPL * 100, cur);
+        if(swoosh){
+          const now = performance.now();
+          const gFrac = Math.abs((cur - fromXP) / (toXP - fromXP));
+          const dt = (now - lastT) / 1000;
+          if(dt > 0.001){ swoosh.update(Math.abs(gFrac - lastG) / dt * totalSec); lastG = gFrac; lastT = now; }
+        }
+      });
+      if(seg.levelup){
+        const newLevel = band + 1;
+        const rankUp = Math.floor(newLevel/10) > Math.floor(band/10);
+        setPanel(newLevel, 0, newLevel*XPL);
+        fxLevelUp(newLevel, rankUp);
+      }else if(seg.leveldown){
+        const newLevel = band - 1;
+        setPanel(newLevel, 100, (newLevel+1)*XPL);
+        fxLevelDown(newLevel);
+      }
+    }
+  }finally{
+    if(swoosh) swoosh.stop();
+  }
+  const fin = statusAt(toXP);
+  setPanel(fin.level, fin.progress*100, toXP);
+  updateRank(fin.level);
+  lastShownXP = toXP;
+  await putOne("settings", {key:"lastShownXP", value:toXP});
+}
+
+/* ---------- Session-Abschluss + Berichte ---------- */
+function queueCount(){
+  return allTextures.filter(t=> effectiveRatable(t) && t.rating == null).length;
+}
+function buildReport(){
+  const endXP = sessionXP();                 // Session-Ende über das eingefrorene Set
+  const li = levelInfo(endXP);
+  const levelBefore = Math.floor(snapshotXP / XP_PER_LEVEL);
+  const rankBeforeIdx = Math.min(10, Math.floor(levelBefore/10));
+  const list1 = [], list2 = [];
+  sessionStart.forEach((meta, id)=>{
+    const t = texById.get(id);
+    if(!t || t.rating == null || isExcluded(t)) return;
+    if(meta.prevRating == null) list1.push({name:t.name, score:t.rating});
+    else list2.push({name:t.name, score:t.rating, prevScore:meta.prevRating, delta:t.rating - meta.prevRating});
+  });
+  list1.sort((a,b)=> b.score - a.score || a.name.localeCompare(b.name));
+  list2.sort((a,b)=> b.delta - a.delta || a.name.localeCompare(b.name));
+  const d = new Date(), p = n=> String(n).padStart(2,"0");
+  return {
+    ts: d.toISOString(),
+    time: `${localDay(d)} ${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}`,
+    gainedXP: endXP - snapshotXP,
+    levelBefore, levelAfter: li.level,
+    rankBefore: RANK_NAMES[rankBeforeIdx], rankAfter: RANK_NAMES[li.rankIndex],
+    list1, list2
+  };
+}
+async function saveReport(rep){
+  const rec = await getOne("settings", "reports");
+  const arr = rec ? rec.value : [];
+  arr.push(rep);
+  while(arr.length > 50) arr.shift();      // höchstens letzte 50
+  await putOne("settings", {key:"reports", value:arr});
+}
+async function finishSession(){
+  const rep = buildReport();
+  await saveReport(rep);
+  pendingReport = rep;
+  $("rater").hidden = true;
+  document.body.style.overflow = "";
+  // Daten neu laden (Wertungen geändert), aber Ansicht nicht via refresh umschalten.
+  allTextures = await getAll("textures");
+  texById = new Map(allTextures.map(t=>[t.id, t]));
+  normalizeGroups(); buildMemberMap();
+  renderRateBadge();                                          // offene Texturen = 0 -> Badge weg
+  renderDiffAction();                                         // geflaggte abgearbeitet -> Aktion weg
+  await putOne("settings", {key:"view", value:"dashboard"});  // Reload landet sinnvoll
+  showFinish();
+  await renderFinish();
+}
+function listRowsHtml(rep){
+  const l1 = rep.list1.map(r=>
+    `<div class="cl-row"><span class="cl-name">${escapeHtml(r.name)}</span><span class="cl-score">${r.score}</span></div>`
+  ).join("") || '<div class="cl-empty muted">keine</div>';
+  const l2 = rep.list2.map(r=>{
+    const cls = r.delta > 0 ? "up" : r.delta < 0 ? "down" : "zero";
+    const sign = r.delta > 0 ? "+" : "";
+    return `<div class="cl-row"><span class="cl-name">${escapeHtml(r.name)}</span>`
+      + `<span class="cl-hist">${r.prevScore} → ${r.score} <b class="cl-delta ${cls}">${sign}${r.delta}</b></span></div>`;
+  }).join("") || '<div class="cl-empty muted">keine</div>';
+  return `<div class="cl-cols">
+      <div class="cl-col"><h4>Neu gemacht (${rep.list1.length})</h4><div class="cl-scroll">${l1}</div></div>
+      <div class="cl-col"><h4>Neu bearbeitet (${rep.list2.length})</h4><div class="cl-scroll">${l2}</div></div>
+    </div>`;
+}
+// Level-/Rang-Wechsel nur wenn vorhanden ("Level a → b · Rang x → y").
+function changeBits(rep){
+  const bits = [];
+  if(rep.levelAfter !== rep.levelBefore) bits.push(`Level ${rep.levelBefore} → ${rep.levelAfter}`);
+  if(rep.rankBefore !== rep.rankAfter)   bits.push(`Rang ${rep.rankBefore} → ${rep.rankAfter}`);
+  return bits.join(" · ");
+}
+function finishHeaderHtml(rep){
+  const ch = changeBits(rep);
+  return `<div class="fin-head">
+      <div class="fin-gain">+${fmtNum(rep.gainedXP)}<span class="fin-xp">XP</span></div>
+      <div class="fin-sub">diese Session${ch ? " · " + ch : ""}</div>
+    </div>`;
+}
+function finishStatsHtml(rep, li, rated){
+  return `<div class="fin-stats">
+      <div class="fin-stat"><b>${rated}</b><span>bewertet</span></div>
+      <div class="fin-stat"><b>${rep.list1.length}</b><span>neu gemacht</span></div>
+      <div class="fin-stat"><b>${rep.list2.length}</b><span>neu bearbeitet</span></div>
+      <div class="fin-stat"><b>${fmtNum(li.totalXP)}</b><span>gesamt XP</span></div>
+    </div>`;
+}
+// Abschluss-Screen aufbauen + XP-Animation snapshotXP -> totalXP starten.
+async function renderFinish(){
+  const rep = pendingReport; if(!rep) return;
+  const li = levelInfo(sessionXP());          // Session-Ende über das eingefrorene Set
+  const rated = rep.list1.length + rep.list2.length;
+  $("finish").innerHTML =
+    finishHeaderHtml(rep) + statusHeroHtml(li, snapshotXP) + finishStatsHtml(rep, li, rated)
+    + listRowsHtml(rep) + exportReminderHtml()
+    + `<div class="fin-actions"><button id="finish-next" class="primary">Weiter zum Dashboard</button></div>`;
+  wireExportReminder($("finish"));
+  $("finish-next").addEventListener("click", ()=> setView("dashboard"));
+  pendingAnim = false;
+  if(!statusAnimating){
+    statusAnimating = true;
+    animateStatus(snapshotXP, li.totalXP).finally(()=>{ statusAnimating = false; });
+  }
+}
+function showFinish(){
+  $("view-rate").hidden = true;
+  $("view-dashboard").hidden = true;
+  $("view-reports").hidden = true;
+  $("view-finish").hidden = false;
+  $("dashboard").innerHTML = "";   // doppelte Hero-IDs vermeiden
+  document.querySelectorAll("#view-switch .segbtn").forEach(b=> b.classList.remove("active"));
+}
+async function renderReports(){
+  const root = $("reports");
+  const rec = await getOne("settings", "reports");
+  const arr = rec ? rec.value : [];
+  if(arr.length === 0){
+    root.innerHTML = '<p class="dash-empty">Noch keine Berichte. Eine Bewertungs-Session abschließen.</p>';
+    return;
+  }
+  root.innerHTML = "";
+  arr.slice().reverse().forEach(rep=>{          // neuester oben
+    const item = document.createElement("div");
+    item.className = "report-item";
+    const head = document.createElement("div");
+    head.className = "report-head";
+    const ch = changeBits(rep);
+    head.innerHTML =
+      `<span class="rep-xp">+${fmtNum(rep.gainedXP)} XP</span>`
+      + `<div class="rep-meta"><span class="rep-time">${rep.time}</span>`
+      + (ch ? `<span class="rep-change">${ch}</span>` : "") + `</div>`
+      + `<div class="rep-summary muted">Neu gemacht ${rep.list1.length} · Neu bearbeitet ${rep.list2.length}</div>`
+      + `<span class="rep-toggle">▾</span>`;
+    const body = document.createElement("div");
+    body.className = "report-body"; body.hidden = true;
+    body.innerHTML = listRowsHtml(rep);
+    head.addEventListener("click", ()=>{
+      body.hidden = !body.hidden;
+      item.classList.toggle("open", !body.hidden);
+    });
+    item.append(head, body);
+    root.appendChild(item);
+  });
+}
+function renderFlowProgress(){
+  const total = rateList.length;
+  const rated = rateList.filter(t=> !isExcluded(t) && t.rating != null).length;
+  $("rate-progress").textContent = `Bewertet ${rated} / ${total}`;
+  const pop = dashPopulation();
+  const decent = pop.filter(t=> effectiveRating(t) >= 50).length;
+  const pct = pop.length ? decent/pop.length*100 : 0;
+  $("flow-done-lab").textContent = `${decent} / ${pop.length} · ${pct.toFixed(1)} %`;
+  $("flow-done-fill").style.width = pct.toFixed(1) + "%";
+}
+// "Nicht bewerten" aufheben: in Gruppe am Repräsentanten, sonst an der Textur.
+async function liftExclude(t){
+  const g = groupByMember.get(t.id);
+  const target = g ? texById.get(g.repId) : t;
+  if(!target) return;
+  target.rateOverride = null;
+  await putOne("textures", target);
+  await persistGroups();
+}
+async function maybeFinish(){
+  if(queueCount() > 0) return false;
+  await finishSession();
+  return true;
+}
+function shiftDay(key, delta){
+  const [y,m,d] = key.split("-").map(Number);
+  return localDay(new Date(y, m-1, d + delta));
+}
+function startOfWeek(d){                          // Wochenstart Montag
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
+  return x;
+}
+// date -> {points: Summe positiver Deltas}. Alt-Events ohne date über ts ableiten.
+function buildDayMap(events){
+  const m = new Map();
+  events.forEach(e=>{
+    const d = e.date || (e.ts ? localDay(new Date(e.ts)) : null);
+    if(!d) return;
+    let rec = m.get(d); if(!rec){ rec = {points:0}; m.set(d, rec); }
+    if(e.delta > 0) rec.points += e.delta;
+  });
+  return m;
+}
+function heatLevel(pts){
+  if(pts <= 0) return 0;
+  if(pts < 40) return 1;
+  if(pts < 80) return 2;
+  if(pts < 150) return 3;
+  return 4;
+}
+// Aktive Tage: jeder lokale Tag mit mindestens einem ratingEvents-Eintrag.
+function activeDaySet(events){
+  const s = new Set();
+  events.forEach(e=>{
+    const d = e.date || (e.ts ? localDay(new Date(e.ts)) : null);
+    if(d) s.add(d);
+  });
+  return s;
+}
+// aktuelle Streak: aufeinanderfolgende aktive Tage rückwärts ab heute.
+// Heute noch ohne Aktivität -> ab gestern zählen (kein Bruch).
+function currentStreak(days){
+  let key = localDay(new Date());
+  if(!days.has(key)) key = shiftDay(key, -1);
+  let n = 0;
+  while(days.has(key)){ n++; key = shiftDay(key, -1); }
+  return n;
+}
+function bestStreak(days){
+  let best = 0;
+  for(const k of days){
+    if(days.has(shiftDay(k, -1))) continue;       // nur Lauf-Anfänge
+    let len = 0, cur = k;
+    while(days.has(cur)){ len++; cur = shiftDay(cur, 1); }
+    best = Math.max(best, len);
+  }
+  return best;
+}
+// Tempo: mittlere tägliche Summe positiver Deltas über die letzten 14 Tage mit Aktivität.
+function dailyTempo(dayMap){
+  const active = [...dayMap.entries()].filter(([,v])=> v.points > 0)
+    .sort((a,b)=> a[0] < b[0] ? 1 : -1).slice(0, 14);
+  if(active.length === 0) return 0;
+  return active.reduce((s,[,v])=> s + v.points, 0) / active.length;
+}
+
+let lastBadgeCount = 0;
+// Gelbe Zahl unten rechts am Bewerten-Button = offene (ungewertete) Texturen der Population.
+function renderRateBadge(){
+  let badge = $("rate-badge");
+  if(!badge){
+    badge = document.createElement("span"); badge.id = "rate-badge";
+    $("rate-start").appendChild(badge);
+  }
+  const n = allTextures.filter(t=> effectiveRatable(t) && t.rating == null).length;
+  $("rate-start").disabled = n <= 0;          // gesperrt, solange nichts offen
+  if(n <= 0){ badge.hidden = true; lastBadgeCount = 0; return; }
+  const grew = badge.hidden || n > lastBadgeCount;
+  badge.textContent = n;
+  badge.hidden = false;
+  if(grew){                                        // Einblenden bzw. Puls bei Erscheinen/Anstieg
+    badge.classList.remove("pulse");
+    void badge.offsetWidth;
+    badge.classList.add("pulse");
+  }
+  lastBadgeCount = n;
+}
+
+// Komplettes Dashboard, alle Werte live aus DB + Population berechnet (kein Caching).
+async function renderDashboard(){
+  const root = $("dashboard");
+  if(allTextures.length === 0){
+    root.innerHTML = '<p class="dash-empty">Noch keine Daten — ZIP laden.</p>';
+    return;
+  }
+  const evRec = await getOne("settings", "ratingEvents");
+  const events = evRec ? evRec.value : [];
+
+  const pop    = dashPopulation();
+  const li     = levelInfo(pop);
+  const rated  = pop.filter(t=> t.rating != null);
+  const decent = pop.filter(t=> effectiveRating(t) >= 50);
+  const queue  = pop.filter(t=> effectiveRating(t) < 50);
+  const best   = pop.reduce((m,t)=> Math.max(m, effectiveRating(t)), 0);
+  const avgScore = rated.length ? rated.reduce((s,t)=> s + t.rating, 0) / rated.length : 0;
+
+  const statusHtml = statusHeroHtml(li);
+  const statsHtml = `
+    <div class="sp-stats">
+      <div class="sp-stat"><b>${rated.length ? avgScore.toFixed(1) : "–"}</b><span>Ø Score</span></div>
+      <div class="sp-stat"><b>${best || "–"}</b><span>Bestwert</span></div>
+      <div class="sp-stat"><b>${decent.length}</b><span>Auf Stufe 50+</span></div>
+      <div class="sp-stat"><b>${queue.length}</b><span>In der Queue (&lt;50)</span></div>
+      <div class="sp-stat"><b>${rated.length}</b><span>Bewertet</span></div>
+      <div class="sp-stat"><b>${pop.length}</b><span>Ziel gesamt</span></div>
+    </div>`;
+
+  const donePct = pop.length ? decent.length / pop.length * 100 : 0;
+  const doneHtml = `
+    <div class="dash-done">
+      <div class="lab"><span>Durchgespielt</span><span>${decent.length} / ${pop.length} · ${donePct.toFixed(1)} %</span></div>
+      <div class="dash-done-track"><div class="dash-done-fill" style="width:${donePct.toFixed(1)}%"></div></div>
+      <div class="hint">100 % durchgespielt = jede Textur der Population auf 50+.</div>
+    </div>`;
+
+  // Streak: aktive Tage (jeder Tag mit mindestens einem Event)
+  const dayMap = buildDayMap(events);
+  const days   = activeDaySet(events);
+  const streakHtml = `
+    <div class="dash-card">
+      <h3>Streak</h3>
+      <div class="streak-flames">
+        <div><div class="big"><span class="sf-flame">${ICON_FLAME}</span> ${currentStreak(days)}</div><div class="sub">aktuelle Streak (Tage)</div></div>
+        <div><div class="big"><span class="sf-medal">${ICON_MEDAL}</span> ${bestStreak(days)}</div><div class="sub">beste Streak</div></div>
+      </div>
+      <div class="hint">Ein aktiver Tag ist jeder Tag mit mindestens einer Bewertung.</div>
+    </div>`;
+
+  // Diese Woche: distinkte bearbeitete Texturen + gewonnene XP (positive Deltas)
+  const wkKey = localDay(startOfWeek(new Date()));
+  let wkPts = 0; const wkIds = new Set();
+  events.forEach(e=>{
+    const d = e.date || (e.ts ? localDay(new Date(e.ts)) : null);
+    if(!d || d < wkKey) return;
+    if(e.delta > 0) wkPts += e.delta;
+    if(e.id != null) wkIds.add(e.id);
+  });
+  const weekHtml = `
+    <div class="dash-card">
+      <h3>Diese Woche</h3>
+      <div class="streak-flames">
+        <div><div class="big">${wkIds.size}</div><div class="sub">bearbeitete Texturen</div></div>
+        <div><div class="big">+${fmtNum(wkPts)}</div><div class="sub">XP (positive Deltas)</div></div>
+      </div>
+    </div>`;
+
+  // Coverage: volle Sicht inkl. Vanilla-Default (Block + Item, nur Repräsentanten)
+  const covBase  = allTextures.filter(t=>
+    (t.category === "block" || t.category === "item") &&
+    !isGroupedNonRep(t) && !isExcluded(t));
+  const covPop   = covBase.filter(t=> !t.isDefault);
+  const cov50    = covPop.filter(t=> effectiveRating(t) >= 50).length;
+  const covUnder = covPop.length - cov50;
+  const coverageHtml = `
+    <div class="dash-card wide">
+      <h3>Abdeckung</h3>
+      <div class="cov-grid">
+        <div class="cov-cell"><b>${covBase.length}</b><span>Gesamt</span></div>
+        <div class="cov-cell"><b>${covPop.length}</b><span>Bearbeitet</span></div>
+        <div class="cov-cell"><b>${cov50}</b><span>auf 50+</span></div>
+        <div class="cov-cell"><b>${covUnder}</b><span>unter 50</span></div>
+      </div>
+      <div class="hint">Volle Sicht inkl. Vanilla-Default — anders als „Durchgespielt".</div>
+    </div>`;
+
+  // Heatmap: Spalten = Wochen, 7 Zeilen Wochentage
+  const sow   = startOfWeek(new Date());
+  const first = new Date(sow); first.setDate(first.getDate() - (HEAT_WEEKS - 1) * 7);
+  const today = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
+  let colsHtml = "";
+  for(let c=0;c<HEAT_WEEKS;c++){
+    let col = "";
+    for(let r=0;r<7;r++){
+      const d = new Date(first); d.setDate(first.getDate() + c*7 + r);
+      if(d > today){ col += `<div class="hm-cell empty"></div>`; continue; }
+      const key = localDay(d);
+      const rec = dayMap.get(key) || {points:0};
+      const lvl = heatLevel(rec.points);
+      const bg = lvl === 0 ? "" : `background:${HEAT_COLORS[lvl]}`;
+      col += `<div class="hm-cell" style="${bg}" data-key="${key}" data-pts="${Math.round(rec.points)}"></div>`;
+    }
+    colsHtml += `<div class="hm-col">${col}</div>`;
+  }
+
+  // Prognose
+  const restauf = queue.reduce((s,t)=> s + (50 - effectiveRating(t)), 0);
+  const tempo   = dailyTempo(dayMap);
+  let forecast;
+  if(queue.length === 0){
+    forecast = "Queue leer — alles auf 50+. Nichts mehr offen.";
+  }else if(tempo <= 0){
+    forecast = `Restaufwand ${fmtNum(restauf)} Punkte · noch kein Tempo — ein paar aktive Tage, dann erscheint ein Zieldatum.`;
+  }else{
+    const tage = Math.ceil(restauf / tempo);
+    const ziel = new Date(); ziel.setDate(ziel.getDate() + tage);
+    forecast = `Restaufwand ${fmtNum(restauf)} Punkte · Tempo ~${fmtNum(tempo)}/Tag · noch ${tage} Tage → ${localDay(ziel)}`;
+  }
+  const heatHtml = `
+    <div class="dash-card wide">
+      <h3>Aktivität (Plus-Punkte je Tag)</h3>
+      <div class="hm-wrap" id="dash-heat">${colsHtml}</div>
+      <div class="hm-readout" id="dash-heat-readout">Über ein Feld fahren für Details.</div>
+      <div class="hm-forecast">Prognose: ${forecast}</div>
+    </div>`;
+
+  root.innerHTML = exportReminderHtml() + statusHtml + statsHtml + doneHtml +
+    `<div class="dash-cards">${streakHtml}${weekHtml}${coverageHtml}${heatHtml}${achievementsCardHtml()}</div>`;
+  wireExportReminder(root);
+
+  // Erfolge prüfen (Population + Events liegen vor). Neu erfüllte -> Toast + Persistenz.
+  checkAchievements(achievementCtx(pop, events));
+
+  // Heatmap-Readout
+  const heat = $("dash-heat"), readout = $("dash-heat-readout");
+  heat.addEventListener("mouseover", e=>{
+    const cell = e.target.closest(".hm-cell");
+    if(!cell || !cell.dataset.key) return;
+    readout.textContent = `${cell.dataset.key}: +${cell.dataset.pts} Punkte`;
+  });
+  heat.addEventListener("mouseleave", ()=>{ readout.textContent = "Über ein Feld fahren für Details."; });
+
+  // XP-Animation, sobald Dashboard sichtbar wird: lastShownXP -> totalXP, genau einmal.
+  if(pendingAnim && !statusAnimating){
+    pendingAnim = false; statusAnimating = true;
+    const fromXP = lastShownXP, toXP = li.totalXP;
+    animateStatus(fromXP, toXP).finally(()=>{ statusAnimating = false; });
+  }
+}
+
+/* ---------- Erfolge (Achievements) ---------- */
+// Registry: jede Definition hat id, name, desc, cond(ctx) und optionalen xp-Bonus.
+// xp:0 bei allen Seeds, damit das Session-Delta (Bug 2) rein texturbezogen bleibt —
+// ein echter Bonus müsste sonst in snapshotXP gefaltet werden (s. startRating).
+const ACHIEVEMENTS = [
+  {id:"first_rating",  name:"Erster Pinselstrich", desc:"Erste Textur bewertet.",       xp:0, cond:c=> c.ratedCount >= 1},
+  {id:"ten_decent",    name:"Warmgelaufen",        desc:"10 Texturen auf 50+.",          xp:0, cond:c=> c.decentCount >= 10},
+  {id:"hundred_decent",name:"Hundertschaft",       desc:"100 Texturen auf 50+.",         xp:0, cond:c=> c.decentCount >= 100},
+  {id:"level_10",      name:"Aufgestiegen",        desc:"Level 10 erreicht.",            xp:0, cond:c=> c.level >= 10},
+  {id:"streak_7",      name:"Eine Woche dran",     desc:"7 Tage Streak.",                xp:0, cond:c=> c.streak >= 7},
+  {id:"halfway",       name:"Halbzeit",            desc:"50 % durchgespielt.",           xp:0, cond:c=> c.donePct >= 50},
+  {id:"complete",      name:"Durchgespielt",       desc:"Population komplett auf 50+.",  xp:0, cond:c=> c.popLen > 0 && c.decentCount === c.popLen},
+];
+// Kontext für die Bedingungen aus Population + Event-Log.
+function achievementCtx(pop, events){
+  const decentCount = pop.filter(t=> effectiveRating(t) >= 50).length;
+  const ratedCount  = pop.filter(t=> t.rating != null).length;
+  const popLen = pop.length;
+  return {
+    decentCount, ratedCount, popLen,
+    donePct: popLen ? decentCount / popLen * 100 : 0,
+    level: levelInfo(pop).level,
+    streak: currentStreak(activeDaySet(events)),
+  };
+}
+// Neu erfüllte Erfolge freischalten, persistieren, Toast je neuem Erfolg.
+async function checkAchievements(ctx){
+  const newly = [];
+  for(const a of ACHIEVEMENTS){
+    if(achievementsUnlocked.has(a.id)) continue;
+    let ok = false; try{ ok = a.cond(ctx); }catch{ ok = false; }
+    if(ok){ achievementsUnlocked.add(a.id); newly.push(a); }
+  }
+  if(newly.length){
+    await putOne("settings", {key:"achievements", value:[...achievementsUnlocked]});
+    newly.forEach(showAchievement);
+  }
+  return newly;
+}
+// Toast-Warteschlange: ein Erfolg nach dem anderen, je mit Ton.
+let achQueue = [], achShowing = false;
+function showAchievement(a){
+  achQueue.push(a);
+  if(!achShowing) nextAchievement();
+}
+function nextAchievement(){
+  const a = achQueue.shift();
+  if(!a){ achShowing = false; return; }
+  achShowing = true;
+  soundAchievement();
+  const el = document.createElement("div");
+  el.className = "ach-toast";
+  el.innerHTML = `<span class="ach-ico">${ICON_TROPHY}</span>`
+    + `<div class="ach-txt"><div class="ach-h">Erfolg freigeschaltet</div>`
+    + `<div class="ach-n">${escapeHtml(a.name)}</div>`
+    + `<div class="ach-d">${escapeHtml(a.desc)}</div></div>`;
+  document.body.appendChild(el);
+  requestAnimationFrame(()=> el.classList.add("show"));
+  setTimeout(()=>{
+    el.classList.remove("show");
+    setTimeout(()=>{ el.remove(); nextAchievement(); }, 320);
+  }, 3200);
+}
+function soundAchievement(){
+  if(!ensureAudio()) return;
+  [784, 988, 1175].forEach((f,i)=> synthTone(f, i*0.07, 0.22, "triangle", 0.14));
+}
+// Dashboard-Karte: alle Erfolge, freigeschaltete hervorgehoben.
+function achievementsCardHtml(){
+  const cells = ACHIEVEMENTS.map(a=>{
+    const on = achievementsUnlocked.has(a.id);
+    return `<div class="ach-cell${on ? " on" : ""}" title="${escapeHtml(a.desc)}">`
+      + `<span class="ach-cell-ico">${ICON_TROPHY}</span>`
+      + `<div class="ach-cell-n">${escapeHtml(a.name)}</div>`
+      + `<div class="ach-cell-d">${escapeHtml(a.desc)}</div></div>`;
+  }).join("");
+  const unlocked = ACHIEVEMENTS.filter(a=> achievementsUnlocked.has(a.id)).length;
+  return `<div class="dash-card wide">
+      <h3>Erfolge <span class="muted">(${unlocked}/${ACHIEVEMENTS.length})</span></h3>
+      <div class="ach-grid">${cells}</div>
+    </div>`;
+}
+
+// Auswahl geändert -> persistieren, Filter + Übersicht neu
+async function onCategoryToggle(){
+  const checked = [...document.querySelectorAll("#categories input:checked")].map(c=>c.value);
+  await putOne("settings", {key:"selectedCategories", value:checked});
+  selectedCats = new Set(checked);
+  binFilter = null;
+  renderFilters();
+  renderAll();
+}
+
+// Zustand aus DB laden und alles zeichnen
+async function refresh(){
+  allTextures = await getAll("textures");
+  const setting = await getOne("settings", "selectedCategories");
+  selectedCats = new Set(setting ? setting.value : ["block","item"]);
+  const bl = await getOne("settings", "baseline");
+  baseline = bl ? bl.value : {};
+  const hd = await getOne("settings", "hideDefault");
+  hideDefault = hd ? hd.value : true;
+  const gs = await getOne("settings", "groups");
+  groups = gs ? gs.value : [];
+  const sm = await getOne("settings", "sortMode");
+  sortMode = sm ? sm.value : "low";
+  const fo = await getOne("settings", "foldersOpen");
+  foldersOpen = fo ? fo.value : false;
+  const ac = await getOne("settings", "achievements");
+  achievementsUnlocked = new Set(ac ? ac.value : []);
+  const le = await getOne("settings", "lastExportAt");
+  lastExportAt = le ? le.value : null;
+  const rs = await getOne("settings", "ratingsSinceExport");
+  ratingsSinceExport = rs ? rs.value : 0;
+  const vw = await getOne("settings", "view");
+  const curView = vw ? vw.value : "rate";
+  applyView(curView);
+  texById = new Map(allTextures.map(t=>[t.id, t]));
+  normalizeGroups();
+  buildMemberMap();
+  const ls = await getOne("settings", "lastShownXP");
+  if(ls){ lastShownXP = ls.value; }
+  else {                                   // Erstwert verankern -> keine Riesen-Animation
+    lastShownXP = levelInfo(dashPopulation()).totalXP;
+    await putOne("settings", {key:"lastShownXP", value:lastShownXP});
+  }
+  renderCategories(categoriesOf(allTextures), selectedCats);
+  renderFilters();
+  renderAll();
+  if(curView === "reports") renderReports();
+  else if(curView === "dashboard"){ pendingAnim = true; renderDashboard(); }
+}
+
+/* ---------- Backup: Erinnerung ---------- */
+// Fällig, wenn seit dem letzten Export zu viele Bewertungen liefen oder es zu lange her ist.
+function exportReminderDue(){
+  if(ratingsSinceExport > EXPORT_REMINDER_AFTER) return true;
+  if(lastExportAt){
+    const days = (Date.now() - new Date(lastExportAt).getTime()) / 86400000;
+    if(days > 14) return true;
+  }
+  return false;
+}
+// Nicht blockierender Hinweis mit direktem Export-Trigger (kein automatischer Download).
+function exportReminderHtml(){
+  if(!exportReminderDue()) return "";
+  return `<div class="export-reminder">`
+    + `<span>Lange kein Backup. Dein Stand liegt nur im Browser und geht beim Leeren des Speichers verloren.</span>`
+    + `<button class="export-reminder-btn">Backup exportieren</button></div>`;
+}
+function wireExportReminder(root){
+  const btn = root.querySelector(".export-reminder-btn");
+  if(btn) btn.addEventListener("click", exportBackup);
+}
+
+/* ---------- Backup: Export / Import ---------- */
+// Alles aus beiden Stores einsammeln und als JSON herunterladen.
+async function exportBackup(){
+  try{
+    const textures = await getAll("textures");
+    const settingsArr = await getAll("settings");
+    const settings = {};
+    settingsArr.forEach(s=> settings[s.key] = s.value);   // {key,value} -> {key:value}
+    const data = {
+      app: "mc-texture-rater", version: 1,
+      exportedAt: new Date().toISOString(),
+      textures, settings
+    };
+    const blob = new Blob([JSON.stringify(data)], {type:"application/json"});
+    const d = new Date();
+    const fn = `texturepack-ratings-${d.getFullYear()}-`
+      + `${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`
+      + `_${String(d.getHours()).padStart(2,"0")}-${String(d.getMinutes()).padStart(2,"0")}`
+      + `-${String(d.getSeconds()).padStart(2,"0")}.json`;
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = fn;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(a.href);
+    lastExportAt = new Date().toISOString();              // Erinnerung zurücksetzen
+    ratingsSinceExport = 0;
+    await putOne("settings", {key:"lastExportAt", value:lastExportAt});
+    await putOne("settings", {key:"ratingsSinceExport", value:0});
+    setStatus(`Backup exportiert: ${textures.length} Texturen, ${settingsArr.length} Einstellungen.`);
+  }catch(err){
+    console.error(err);
+    setStatus("Export-Fehler: " + err.message);
+  }
+}
+
+// JSON-Backup einlesen, prüfen, nach Bestätigung Stores komplett ersetzen.
+async function importBackup(file){
+  try{
+    const text = await file.text();
+    let data;
+    try{ data = JSON.parse(text); }
+    catch{ setStatus("Import-Fehler: Datei ist kein gültiges JSON."); return; }
+    // Identität prüfen, sonst nichts schreiben
+    if(!data || data.app !== "mc-texture-rater" || data.version !== 1){
+      setStatus("Import-Fehler: Keine passende Backup-Datei (app/version stimmt nicht).");
+      return;
+    }
+    if(!Array.isArray(data.textures) || typeof data.settings !== "object" || data.settings === null){
+      setStatus("Import-Fehler: Backup unvollständig (textures/settings fehlen).");
+      return;
+    }
+    if(!confirm(
+      `Aktuellen Stand vollständig ersetzen?\n`
+      + `${data.textures.length} Texturen und ${Object.keys(data.settings).length} `
+      + `Einstellungen aus dem Backup werden geschrieben. Nicht umkehrbar.`)) return;
+    // leeren, dann zurückschreiben
+    await clearDB();
+    if(data.textures.length) await putAll("textures", data.textures);
+    const settingsRecords = Object.entries(data.settings).map(([key,value])=>({key,value}));
+    if(settingsRecords.length) await putAll("settings", settingsRecords);
+    // Ansicht komplett neu aus DB aufbauen -> Wertungen + Ø stimmen wieder
+    await refresh();
+    setStatus(`Backup importiert: ${data.textures.length} Texturen, ${settingsRecords.length} Einstellungen.`);
+  }catch(err){
+    console.error(err);
+    setStatus("Import-Fehler: " + err.message);
+  }
+}
+
+/* ---------- Events ---------- */
+$("file").addEventListener("change", e=>{
+  const f = e.target.files[0];
+  if(f) handleZip(f);
+  e.target.value = ""; // gleiche Datei erneut wählbar
+});
+
+$("baseline-file").addEventListener("change", e=>{
+  const f = e.target.files[0];
+  if(f) handleBaseline(f);
+  e.target.value = ""; // gleiche Datei erneut wählbar
+});
+
+$("backup-export").addEventListener("click", exportBackup);
+
+$("backup-file").addEventListener("change", e=>{
+  const f = e.target.files[0];
+  if(f) importBackup(f);
+  e.target.value = ""; // gleiche Datei erneut wählbar
+});
+
+$("reset").addEventListener("click", async ()=>{
+  if(!confirm("Alle gespeicherten Texturen und die Auswahl löschen?")) return;
+  await clearDB();
+  $("diffbox").innerHTML = "";
+  groupMode = false; selectedTiles.clear(); groupPanelOpen = false; onlyReps = false;
+  await refresh();
+  setStatus("Zurückgesetzt.");
+});
+
+/* ---------- Ansichts-Umschalter (Bewerten / Dashboard) ---------- */
+function applyView(view){
+  const v = (view === "dashboard" || view === "reports") ? view : "rate";
+  $("view-rate").hidden = v !== "rate";
+  $("view-dashboard").hidden = v !== "dashboard";
+  $("view-reports").hidden = v !== "reports";
+  $("view-finish").hidden = true;                         // Abschluss ist transient
+  document.querySelectorAll("#view-switch .segbtn")
+    .forEach(b=> b.classList.toggle("active", b.dataset.view === v));
+}
+async function setView(view){
+  ensureAudio();                                          // Geste -> Audio bereit
+  pendingReport = null;                                   // Abschluss-Screen verlassen
+  applyView(view);
+  if(view === "dashboard"){ pendingAnim = true; renderDashboard(); }   // live neu rechnen + Animation
+  else if(view === "reports") renderReports();
+  await putOne("settings", {key:"view", value:view});     // persistieren
+}
+document.querySelectorAll("#view-switch .segbtn")
+  .forEach(b=> b.addEventListener("click", ()=> setView(b.dataset.view)));
+
+// Panel-Automatik (zentraler Hook): offenes Gruppen-Verwaltungs-Panel schließt bei
+// jeder anderen Interaktion — Status, Sortierung, Kategorien, Standard-Schalter,
+// Gruppieren, Bewerten starten, Ansichtswechsel, Klick in die Rating-Verteilung.
+document.addEventListener("click", e=>{
+  if(!groupPanelOpen) return;
+  if(e.target.closest("#grouppanel")) return;     // Klicks im Panel selbst nicht
+  if(e.target.closest("#grp-open-btn")) return;    // eigener Toggle regelt sich selbst
+  groupPanelOpen = false;
+  renderGroupPanel();
+}, true);
+
+// Drag & Drop: Vollflächen-Overlay über das ganze Fenster. dragenter/dragleave-Zähler
+// fängt Flackern bei verschachtelten Elementen ab. Drop läuft über den handleZip-Pfad.
+const dzOverlay = $("dropzone-overlay");
+let dragDepth = 0;
+const dragHasFiles = e => e.dataTransfer && [...e.dataTransfer.types].includes("Files");
+window.addEventListener("dragenter", e=>{
+  if(!dragHasFiles(e)) return;
+  e.preventDefault();
+  dragDepth++; dzOverlay.hidden = false;
+});
+window.addEventListener("dragover", e=>{ e.preventDefault(); });
+window.addEventListener("dragleave", e=>{
+  e.preventDefault();
+  if(--dragDepth <= 0){ dragDepth = 0; dzOverlay.hidden = true; }
+});
+window.addEventListener("drop", e=>{
+  e.preventDefault();
+  dragDepth = 0; dzOverlay.hidden = true;
+  const files = e.dataTransfer ? [...e.dataTransfer.files] : [];
+  const f = files.find(f=>/\.zip$/i.test(f.name));
+  if(f) handleZip(f); else if(files.length) setStatus("Keine ZIP-Datei erkannt.");
+});
+
+/* ---------- Phase 2: Bewerten ---------- */
+let rateList = [], rateIdx = 0;   // aktuelle Liste + Position
+let snapshotXP = 0, sessionStart = new Map(), pendingReport = null;
+let sessionPopIds = new Set();    // zu Sessionbeginn eingefrorene Population (id-Set) für die Delta-Rechnung
+let pendingAnim = false, statusAnimating = false, lastShownXP = 0, audioCtx = null;
+
+// XP über die eingefrorene Session-Population (sessionPopIds). Gleiches xpValue zum Start
+// (snapshotXP) wie zum Ende (buildReport/Animation): identische Mitgliedschaft + identisches
+// Wertmaß, ein Mid-Session-Exclude eines re-uploadeten Reps wiegt beidseitig prevRating -> Delta 0.
+function sessionXP(){
+  let sum = 0;
+  sessionPopIds.forEach(id=>{ const t = texById.get(id); if(t) sum += xpValue(t); });
+  return sum + groupBonusXP();
+}
+
+// Session starten. Menge = Population (effectiveRatable) mit Rating null zum Start.
+// onlyFlagged=true -> zusätzlich nur neue & geänderte. snapshotXP + prevRating festhalten.
+async function startRating(onlyFlagged=false){
+  ensureAudio();
+  rateList = allTextures
+    .filter(t=> effectiveRatable(t) && t.rating == null
+      && (!onlyFlagged || t.flag === "new" || t.flag === "changed"))
+    .sort((a,b)=> a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
+  if(rateList.length === 0){
+    setStatus(onlyFlagged ? "Nichts Neues/Geändertes." : "Nichts offen."); return;
+  }
+  // Population als id-Set einfrieren: Start und Ende der Delta-Rechnung nutzen damit
+  // identische Mitgliedschaft. Ein Mid-Session-Exclude verschiebt keine Seite -> das
+  // Delta bleibt rein bewertungsbezogen.
+  sessionPopIds = new Set(dashPopulation().map(t=> t.id));
+  // snapshotXP = XP der eingefrorenen Population zum Start (xpValue zählt re-uploadete
+  // Texturen ab prevRating). Gruppen-Bonus ist während der Session konstant und kürzt
+  // sich aus dem Delta -> Headline = Summe der Listen-Deltas.
+  snapshotXP = sessionXP();
+  sessionStart = new Map();
+  rateList.forEach(t=> sessionStart.set(t.id, { prevRating: t.prevRating != null ? t.prevRating : null }));
+  rateIdx = 0;
+  $("rater").hidden = false;
+  document.body.style.overflow = "hidden";
+  renderRate();
+}
+
+function renderRate(){
+  const stage = $("rate-stage"), sum = $("rate-summary");
+  sum.hidden = true; stage.hidden = false;
+  if(rateList.length === 0){ exitRating(); return; }
+  rateIdx = Math.min(rateList.length - 1, Math.max(0, rateIdx));
+  const t = rateList[rateIdx];
+  $("rate-meta").innerHTML = `${t.name} <span class="c">· ${t.category}</span>`;
+  if(t.prevDataUrl){                          // geändert: alt vs neu nebeneinander
+    $("rate-img").hidden = true;
+    $("rate-compare").hidden = false;
+    $("rate-img-old").src = t.prevDataUrl; $("rate-img-old").alt = t.name + " (alt)";
+    $("rate-img-new").src = t.dataUrl;      $("rate-img-new").alt = t.name + " (neu)";
+    $("rate-old-rating").textContent = t.prevRating == null ? "ungewertet" : "★ " + t.prevRating;
+  }else{
+    $("rate-compare").hidden = true;
+    $("rate-img").hidden = false;
+    $("rate-img").src = t.dataUrl;
+    $("rate-img").alt = t.name;
+  }
+  $("rate-value").value  = t.rating == null ? "" : t.rating;
+  $("rate-slider").value = t.rating == null ? 50 : t.rating;
+  // Exclude-Status spiegeln: Button-Text + Markierung am Bild
+  const excluded = isExcluded(t);
+  const exBtn = $("rate-exclude");
+  exBtn.textContent = excluded ? "Doch bewerten (X)" : "Nicht bewerten (X)";
+  exBtn.classList.toggle("active", excluded);
+  $("rate-stage").classList.toggle("excluded", excluded);
+  $("rate-value").focus(); $("rate-value").select();
+  renderFlowProgress();
+}
+
+// aktuellen Wert speichern (sofort in DB) + zur nächsten offenen springen.
+// Queue auf 0 -> Abschluss. Neubewertung einer ausgeschlossenen Textur hebt Ausschluss auf.
+async function commitRate(){
+  const t = rateList[rateIdx]; if(!t) return;
+  const raw = $("rate-value").value.trim();
+  if(raw !== ""){
+    let n = Math.min(100, Math.max(1, Math.round(Number(raw))));
+    if(Number.isFinite(n)){
+      if(isExcluded(t)) await liftExclude(t);
+      await applyRating(t, n);               // Event + sofort persistieren
+    }
+  }
+  if(await maybeFinish()) return;            // Queue leer -> Session-Abschluss
+  let next = rateList.findIndex((x,i)=> i > rateIdx && x.rating == null && !isExcluded(x));
+  if(next === -1) next = rateList.findIndex(x=> x.rating == null && !isExcluded(x));
+  if(next !== -1) rateIdx = next;
+  renderRate();
+}
+
+// "nicht bewerten" togglen. Textur bleibt im Interface (zurückblättern +
+// erneut X = aufheben, dann doch bewerten). In Gruppe: ganze Gruppe mitziehen.
+// Rating bleibt erhalten (eingefroren), Position unverändert.
+async function excludeCurrent(){
+  const t = rateList[rateIdx];
+  if(!t) return;
+  const g = groupByMember.get(t.id);
+  const target = g ? texById.get(g.repId) : t;   // in Gruppe wirkt es am Rep
+  if(!target) return;
+  const newOverride = target.rateOverride === "exclude" ? null : "exclude";
+  target.rateOverride = newOverride;
+  await putOne("textures", target);
+  await persistGroups();
+  if(newOverride === "exclude"){         // ausschließen -> sofort zur nächsten
+    if(await maybeFinish()) return;
+    rateIdx = Math.min(rateList.length - 1, rateIdx + 1);
+  }
+  renderRate();                          // sonst gleiche Stelle, Status sichtbar
+}
+
+// blättern durch die Session-Menge (auch zu bereits bewerteten)
+function navRate(delta){
+  rateIdx = Math.min(rateList.length - 1, Math.max(0, rateIdx + delta));
+  renderRate();
+}
+
+function exitRating(){
+  $("rater").hidden = true;
+  document.body.style.overflow = "";
+  refresh();   // Übersicht mit aktuellen Wertungen neu laden
+}
+
+// Eingabefeld: nur Ziffern, Slider spiegeln
+$("rate-value").addEventListener("input", ()=>{
+  const v = $("rate-value"); v.value = v.value.replace(/[^0-9]/g, "");
+  const n = Number(v.value);
+  if(n >= 1 && n <= 100) $("rate-slider").value = n;
+});
+// Slider als Backup: spiegelt in Eingabefeld
+$("rate-slider").addEventListener("input", ()=>{ $("rate-value").value = $("rate-slider").value; });
+
+// Tastatursteuerung (nur wenn Bewertung offen)
+document.addEventListener("keydown", e=>{
+  if($("rater").hidden) return;
+  if(e.key === "Escape"){ exitRating(); return; }
+  if(e.key === "Enter"){ e.preventDefault(); commitRate(); }
+  else if(e.key === "x" || e.key === "X"){ e.preventDefault(); excludeCurrent(); }
+  else if(e.key === "ArrowRight"){ e.preventDefault(); navRate(1); }
+  else if(e.key === "ArrowLeft"){  e.preventDefault(); navRate(-1); }
+});
+
+$("rate-start").addEventListener("click", ()=>startRating(false));
+$("rate-exit").addEventListener("click", exitRating);
+$("rate-exclude").addEventListener("click", excludeCurrent);
+
+/* ---------- Start ---------- */
+openDB().then(d=>{ db = d; return refresh(); })
+        .catch(err=>setStatus("DB-Fehler: " + err.message));
+</script>
+</body>
+</html>
