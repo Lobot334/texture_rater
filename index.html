@@ -413,7 +413,7 @@
   .sp-level{display:flex; flex-direction:column; align-items:center; line-height:1}
   .sp-level b{font-size:72px; font-weight:800; color:#fff; text-shadow:0 0 16px rgba(91,156,255,.5)}
   .sp-level span{font-size:12px; letter-spacing:3px; color:var(--muted); margin-top:6px}
-  .sp-rank{font-size:38px; font-weight:800; line-height:1.05}
+  .sp-rank{font-size:38px; font-weight:800; line-height:1.05; white-space:nowrap}
   .sp-rank small{display:block; font-size:12px; letter-spacing:3px; color:var(--muted); font-weight:400; margin-top:4px}
   .sp-xp{margin-top:22px}
   .sp-xpbar{
@@ -582,7 +582,6 @@
   }
   #sp-level-num.lvlpulse{animation:spPulse .42s ease}
   #sp-level-num.rankpulse{animation:spRankPulse .65s ease}
-  #sp-level-num.lvldown{animation:spDown .42s ease}
   @keyframes spPulse{
     0%{transform:scale(1)}
     45%{transform:scale(1.32); color:#5fe0c0; text-shadow:0 0 18px rgba(95,224,192,.85)}
@@ -591,11 +590,6 @@
   @keyframes spRankPulse{
     0%{transform:scale(1)}
     40%{transform:scale(1.5); color:#9fe9d8; text-shadow:0 0 24px rgba(95,224,192,.95)}
-    100%{transform:scale(1)}
-  }
-  @keyframes spDown{
-    0%{transform:scale(1)}
-    45%{transform:scale(.8); color:#E24B4A}
     100%{transform:scale(1)}
   }
   .sp-rank{transition:color .6s ease}
@@ -1156,10 +1150,6 @@ function tierOf(rating){
 function isDecent(rating){ return (rating == null ? 0 : rating) >= 50; }
 // Einzige Wahrheit für den Wert einer Textur: aktuelles Rating, sonst 0.
 function effectiveRating(t){ return (t && t.rating != null) ? t.rating : 0; }
-// Session-XP-Wert: aktuelles Rating, sonst (re-uploadet) prevRating, sonst 0. Anders als
-// effectiveRating zählt eine geänderte Textur ihren alten Score, damit ein Mid-Session-Exclude
-// (rating bleibt null, prevRating bleibt erhalten) auf beiden Delta-Seiten gleich wiegt.
-function xpValue(t){ return t.rating != null ? t.rating : (t.prevRating != null ? t.prevRating : 0); }
 
 /* ---------- Rating-Event-Log + zentrale Rating-Setzung ---------- */
 // Append-only Log in settings["ratingEvents"]; sofort persistieren.
@@ -1168,8 +1158,7 @@ async function logRatingEvent(t, oldVal, newVal){
   const events = rec ? rec.value : [];
   events.push({
     ts: new Date().toISOString(), date: localDay(new Date()), id: t.id, category: t.category,
-    old: oldVal, new: newVal, delta: newVal - oldVal,
-    crossedFifty: oldVal < 50 && newVal >= 50
+    old: oldVal, new: newVal, delta: newVal - oldVal
   });
   await putOne("settings", {key:"ratingEvents", value:events});
 }
@@ -1184,6 +1173,12 @@ async function applyRating(t, newRating){
   t.prevDataUrl = null;
   if(oldVal !== newVal){
     await logRatingEvent(t, oldVal, newVal);
+    // monotoner Akkumulator: nur positive Deltas zählen, Absenkungen ändern earnedXP nicht
+    const gain = Math.max(0, newVal - oldVal);
+    if(gain > 0){
+      earnedXP += gain;
+      await putOne("settings", {key:"earnedXP", value:earnedXP});
+    }
     ratingsSinceExport++;                                 // Backup-Erinnerung speist sich daraus
     await putOne("settings", {key:"ratingsSinceExport", value:ratingsSinceExport});
   }
@@ -1226,6 +1221,7 @@ let foldersOpen = false;              // "Erfasste Ordner" ausgeklappt (persisti
 let achievementsUnlocked = new Set(); // freigeschaltete Erfolg-IDs (persistiert)
 let lastExportAt = null;              // ISO-Zeit des letzten Backups (persistiert)
 let ratingsSinceExport = 0;           // echte Wertänderungen seit letztem Backup (persistiert)
+let earnedXP = 0;                     // monotoner XP-Akkumulator: Summe positiver Rating-Deltas (persistiert)
 
 // Sektion sortieren: alpha nach Name, sonst nach effectiveRating (auf-/absteigend),
 // Gleichstand nach Name. effectiveRating = rating ?? 0 -> Unbewertete sind 0.
@@ -1790,35 +1786,18 @@ const HEAT_COLORS = ["", "#9FE1CB", "#5DCAA5", "#1D9E75", "#0F6E56"];  // Stufe 
 // Population exakt wie Durchschnitt + Tier-Leiter: Repräsentanten, kein Default, kein exclude.
 function dashPopulation(){ return allTextures.filter(effectiveRatable); }
 
-// Bonus: 20 XP je bewertetem Nicht-Repräsentanten einer Gruppe. Mitglieder zählen
-// sonst nicht zur Population — diese Quelle würdigt ihre Arbeit. "texturiert" = rating != null.
-// Konstant während einer Session (Nicht-Reps werden nie in einer Session bewertet, Gruppen
-// nicht währenddessen gebildet) -> Session-Delta bleibt rein texturbezogen, solange der
-// Snapshot den Bonus mitzählt (s. startRating).
-const GROUP_BONUS_PER_MEMBER = 20;
-function groupBonusXP(){
-  let n = 0;
-  for(const g of groups){
-    for(const id of g.memberIds){
-      if(id === g.repId) continue;
-      const t = texById.get(id);
-      if(t && !t.isDefault && t.rating != null) n++;
-    }
-  }
-  return n * GROUP_BONUS_PER_MEMBER;
-}
-// XP-Quellen: Score-Summe der Population + Gruppen-Bonus -> rückwirkend zählt alle Arbeit.
-function xpSources(pop){
-  const scoreSum = pop.reduce((s,t)=> s + effectiveRating(t), 0);
-  return scoreSum + groupBonusXP();
-}
-function levelInfo(pop){
-  const totalXP   = Array.isArray(pop) ? xpSources(pop) : pop;   // Population oder roher XP-Wert
+// Level/Rang aus rohem XP-Wert (monotoner earnedXP-Stand), kein Cap.
+function levelInfo(totalXP){
   const level     = Math.floor(totalXP / XP_PER_LEVEL);
   const xpInLevel = totalXP - level * XP_PER_LEVEL;
   const progress  = xpInLevel / XP_PER_LEVEL;
   const rankIndex = Math.min(10, Math.floor(level / 10));
   return {totalXP, level, xpInLevel, progress, rankIndex};
+}
+// Rangname inkl. Netherit-Stufen: Level 100 = "Netherit", 101 = "Netherit 1", offen nach oben.
+function rankLabel(level){
+  if(level < 100) return RANK_NAMES[Math.min(10, Math.floor(level / 10))];
+  return level === 100 ? "Netherit" : "Netherit " + (level - 100);
 }
 
 const fmtNum = n => Math.round(n).toLocaleString("de-DE");   // Tausenderpunkt
@@ -1893,7 +1872,6 @@ function startSwoosh(up){
 
 /* ---------- XP-Animation (CS-Stil) ---------- */
 const easeOutExpo = p => p >= 1 ? 1 : 1 - Math.pow(2, -10*p);   // schnell raus, kriecht ins Ziel
-const easeDamped  = p => 1 - Math.pow(1 - p, 3);                // gedämpft (Minus)
 function tween(dur, ease, step){
   return new Promise(res=>{
     if(dur <= 0){ step(1); res(); return; }
@@ -1933,7 +1911,7 @@ function rankSegsHtml(curIdx){
   }).join("");
 }
 // Status-Hero (Punkt 2): identisch in Dashboard und Abschluss.
-// snap (snapshotXP) optional: nur im Abschluss uebergeben -> Bewegungs-Caption unterm Balken.
+// snap (snapshotEarnedXP) optional: nur im Abschluss uebergeben -> Bewegungs-Caption unterm Balken.
 function statusHeroHtml(li, snap){
   let captionHtml = "";
   if(snap != null){
@@ -1950,7 +1928,7 @@ function statusHeroHtml(li, snap){
       <div class="sp-top">
         <div class="sp-level"><b id="sp-level-num">${li.level}</b><span>Level</span></div>
         <div class="sp-rank" id="sp-rank" style="color:${RANK_COLORS[li.rankIndex]}">
-          ${RANK_NAMES[li.rankIndex]}<small>Rang</small></div>
+          ${rankLabel(li.level)}<small>Rang</small></div>
       </div>
       <div class="sp-xp">
         <div class="sp-xpbar"><div class="sp-xpfill" id="sp-xpfill" style="width:${(li.progress*100).toFixed(1)}%"></div></div>
@@ -1967,7 +1945,7 @@ function statusHeroHtml(li, snap){
 function updateRank(level){
   const idx = Math.min(10, Math.floor(level/10));
   const rk = $("sp-rank");
-  if(rk){ rk.style.color = RANK_COLORS[idx]; rk.innerHTML = `${RANK_NAMES[idx]}<small>Rang</small>`; }
+  if(rk){ rk.style.color = RANK_COLORS[idx]; rk.innerHTML = `${rankLabel(level)}<small>Rang</small>`; }
   const box = $("sp-ranks");
   if(box) box.innerHTML = rankSegsHtml(idx);
 }
@@ -1982,40 +1960,25 @@ function fxLevelUp(newLevel, rankUp){
   if(rankUp){ updateRank(newLevel); soundRankUp(); }   // Rang-Up: Farbe + Akkord
   else soundLevelUp();                                  // Level-Up: Dreiklang
 }
-function fxLevelDown(newLevel){
-  flashClass($("sp-level-num"), "lvldown", 420);
-  updateRank(newLevel);
-}
 // Segmentweise von fromXP -> toXP, an jeder Levelgrenze Level-Up, Balken auf 0.
+// Nur aufwärts: toXP >= fromXP ist durch die earnedXP-Monotonie garantiert.
 async function animateStatus(fromXP, toXP){
   const panel = $("status-panel-el"); if(!panel) return;
   const XPL = XP_PER_LEVEL;
-  if(Math.abs(toXP - fromXP) < 1){
+  if(toXP - fromXP < 1){
     lastShownXP = toXP; await putOne("settings", {key:"lastShownXP", value:toXP}); return;
   }
-  const up = toXP > fromXP;
   const segs = [];
-  if(up){
-    let x = fromXP;
-    while(true){
-      const band = Math.floor(x / XPL);
-      const nb = (band+1) * XPL;
-      if(nb <= toXP){ segs.push({band, from:x, to:nb, levelup:true}); x = nb; if(x === toXP) break; }
-      else { segs.push({band, from:x, to:toXP, levelup:false}); break; }
-    }
-  }else{
-    let x = fromXP;
-    while(x > toXP){
-      let band = Math.floor(x / XPL);
-      if(band*XPL === x) band -= 1;
-      const lb = band * XPL;
-      if(lb > toXP){ segs.push({band, from:x, to:lb, leveldown:true}); x = lb; }
-      else { segs.push({band, from:x, to:toXP, leveldown:false}); break; }
-    }
+  let x = fromXP;
+  while(true){
+    const band = Math.floor(x / XPL);
+    const nb = (band+1) * XPL;
+    if(nb <= toXP){ segs.push({band, from:x, to:nb, levelup:true}); x = nb; if(x === toXP) break; }
+    else { segs.push({band, from:x, to:toXP, levelup:false}); break; }
   }
   // Dauer: ~1000ms je volles Level, ~600ms Teilstück. >10 Level -> auf ~12s stauchen.
-  const fullSegs = segs.filter(s=> s.levelup || s.leveldown).length;
-  const hasPartial = segs.some(s=> !s.levelup && !s.leveldown);
+  const fullSegs = segs.filter(s=> s.levelup).length;
+  const hasPartial = segs.some(s=> !s.levelup);
   const total = fullSegs*1000 + (hasPartial ? 600 : 0);
   const scale = fullSegs > 10 ? Math.min(1, 12000 / total) : 1;
   const totalSec = Math.max(0.2, total*scale / 1000);
@@ -2025,20 +1988,18 @@ async function animateStatus(fromXP, toXP){
   setPanel(startLevel, (fromXP - startLevel*XPL) / XPL * 100, fromXP);
 
   // Swoosh läuft über die ganze Animation, Tonhöhe folgt der Füllgeschwindigkeit.
-  const swoosh = startSwoosh(up);
+  const swoosh = startSwoosh(true);
   let lastG = 0, lastT = performance.now();
   try{
     for(const seg of segs){
-      const full = seg.levelup || seg.leveldown;
-      const dur = (full ? 1000 : 600) * scale;
-      const ease = up ? easeOutExpo : easeDamped;
+      const dur = (seg.levelup ? 1000 : 600) * scale;
       const band = seg.band;
-      await tween(dur, ease, e=>{
+      await tween(dur, easeOutExpo, e=>{
         const cur = seg.from + (seg.to - seg.from) * e;
         setPanel(band, (cur - band*XPL) / XPL * 100, cur);
         if(swoosh){
           const now = performance.now();
-          const gFrac = Math.abs((cur - fromXP) / (toXP - fromXP));
+          const gFrac = (cur - fromXP) / (toXP - fromXP);
           const dt = (now - lastT) / 1000;
           if(dt > 0.001){ swoosh.update(Math.abs(gFrac - lastG) / dt * totalSec); lastG = gFrac; lastT = now; }
         }
@@ -2048,10 +2009,6 @@ async function animateStatus(fromXP, toXP){
         const rankUp = Math.floor(newLevel/10) > Math.floor(band/10);
         setPanel(newLevel, 0, newLevel*XPL);
         fxLevelUp(newLevel, rankUp);
-      }else if(seg.leveldown){
-        const newLevel = band - 1;
-        setPanel(newLevel, 100, (newLevel+1)*XPL);
-        fxLevelDown(newLevel);
       }
     }
   }finally{
@@ -2069,10 +2026,8 @@ function queueCount(){
   return allTextures.filter(t=> effectiveRatable(t) && t.rating == null).length;
 }
 function buildReport(){
-  const endXP = sessionXP();                 // Session-Ende über das eingefrorene Set
-  const li = levelInfo(endXP);
-  const levelBefore = Math.floor(snapshotXP / XP_PER_LEVEL);
-  const rankBeforeIdx = Math.min(10, Math.floor(levelBefore/10));
+  const li = levelInfo(earnedXP);
+  const levelBefore = Math.floor(snapshotEarnedXP / XP_PER_LEVEL);
   const list1 = [], list2 = [];
   sessionStart.forEach((meta, id)=>{
     const t = texById.get(id);
@@ -2085,10 +2040,10 @@ function buildReport(){
   const d = new Date(), p = n=> String(n).padStart(2,"0");
   return {
     ts: d.toISOString(),
-    time: `${localDay(d)} ${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}`,
-    gainedXP: endXP - snapshotXP,
+    time: `${localDay(d)} ${p(d.getHours())}:${p(d.getMinutes())} Uhr`,
+    gainedXP: earnedXP - snapshotEarnedXP,
     levelBefore, levelAfter: li.level,
-    rankBefore: RANK_NAMES[rankBeforeIdx], rankAfter: RANK_NAMES[li.rankIndex],
+    rankBefore: rankLabel(levelBefore), rankAfter: rankLabel(li.level),
     list1, list2
   };
 }
@@ -2152,13 +2107,13 @@ function finishStatsHtml(rep, li, rated){
       <div class="fin-stat"><b>${fmtNum(li.totalXP)}</b><span>gesamt XP</span></div>
     </div>`;
 }
-// Abschluss-Screen aufbauen + XP-Animation snapshotXP -> totalXP starten.
+// Abschluss-Screen aufbauen + XP-Animation snapshotEarnedXP -> earnedXP starten.
 async function renderFinish(){
   const rep = pendingReport; if(!rep) return;
-  const li = levelInfo(sessionXP());          // Session-Ende über das eingefrorene Set
+  const li = levelInfo(earnedXP);
   const rated = rep.list1.length + rep.list2.length;
   $("finish").innerHTML =
-    finishHeaderHtml(rep) + statusHeroHtml(li, snapshotXP) + finishStatsHtml(rep, li, rated)
+    finishHeaderHtml(rep) + statusHeroHtml(li, snapshotEarnedXP) + finishStatsHtml(rep, li, rated)
     + listRowsHtml(rep) + exportReminderHtml()
     + `<div class="fin-actions"><button id="finish-next" class="primary">Weiter zum Dashboard</button></div>`;
   wireExportReminder($("finish"));
@@ -2166,7 +2121,7 @@ async function renderFinish(){
   pendingAnim = false;
   if(!statusAnimating){
     statusAnimating = true;
-    animateStatus(snapshotXP, li.totalXP).finally(()=>{ statusAnimating = false; });
+    animateStatus(snapshotEarnedXP, li.totalXP).finally(()=>{ statusAnimating = false; });
   }
 }
 function showFinish(){
@@ -2318,7 +2273,8 @@ function renderRateBadge(){
   lastBadgeCount = n;
 }
 
-// Komplettes Dashboard, alle Werte live aus DB + Population berechnet (kein Caching).
+// Komplettes Dashboard. XP/Level/Rang aus dem monotonen earnedXP, alle übrigen
+// Werte live aus DB + Population berechnet (kein Caching).
 async function renderDashboard(){
   const root = $("dashboard");
   if(allTextures.length === 0){
@@ -2329,7 +2285,7 @@ async function renderDashboard(){
   const events = evRec ? evRec.value : [];
 
   const pop    = dashPopulation();
-  const li     = levelInfo(pop);
+  const li     = levelInfo(earnedXP);
   const rated  = pop.filter(t=> t.rating != null);
   const decent = pop.filter(t=> effectiveRating(t) >= 50);
   const queue  = pop.filter(t=> effectiveRating(t) < 50);
@@ -2471,8 +2427,8 @@ async function renderDashboard(){
 
 /* ---------- Erfolge (Achievements) ---------- */
 // Registry: jede Definition hat id, name, desc, cond(ctx) und optionalen xp-Bonus.
-// xp:0 bei allen Seeds, damit das Session-Delta (Bug 2) rein texturbezogen bleibt —
-// ein echter Bonus müsste sonst in snapshotXP gefaltet werden (s. startRating).
+// xp:0 bei allen Seeds — ein echter Bonus müsste beim Freischalten in earnedXP
+// verbucht (und persistiert) werden, bislang ungenutzt.
 const ACHIEVEMENTS = [
   {id:"first_rating",  name:"Erster Pinselstrich", desc:"Erste Textur bewertet.",       xp:0, cond:c=> c.ratedCount >= 1},
   {id:"ten_decent",    name:"Warmgelaufen",        desc:"10 Texturen auf 50+.",          xp:0, cond:c=> c.decentCount >= 10},
@@ -2490,7 +2446,7 @@ function achievementCtx(pop, events){
   return {
     decentCount, ratedCount, popLen,
     donePct: popLen ? decentCount / popLen * 100 : 0,
-    level: levelInfo(pop).level,
+    level: levelInfo(earnedXP).level,
     streak: currentStreak(activeDaySet(events)),
   };
 }
@@ -2589,10 +2545,26 @@ async function refresh(){
   texById = new Map(allTextures.map(t=>[t.id, t]));
   normalizeGroups();
   buildMemberMap();
+  const earned = await getOne("settings", "earnedXP");
+  if(earned){ earnedXP = earned.value; }
+  else {
+    // Migration (Erstlauf): Startwert = heutiger Live-Stand, also Score-Summe der
+    // Population plus 20 je bewertetem Nicht-Repräsentanten -> kein sichtbarer Sprung.
+    let bonus = 0;
+    for(const g of groups){
+      for(const id of g.memberIds){
+        if(id === g.repId) continue;
+        const t = texById.get(id);
+        if(t && !t.isDefault && t.rating != null) bonus += 20;
+      }
+    }
+    earnedXP = dashPopulation().reduce((s,t)=> s + effectiveRating(t), 0) + bonus;
+    await putOne("settings", {key:"earnedXP", value:earnedXP});
+  }
   const ls = await getOne("settings", "lastShownXP");
   if(ls){ lastShownXP = ls.value; }
   else {                                   // Erstwert verankern -> keine Riesen-Animation
-    lastShownXP = levelInfo(dashPopulation()).totalXP;
+    lastShownXP = earnedXP;
     await putOne("settings", {key:"lastShownXP", value:lastShownXP});
   }
   renderCategories(categoriesOf(allTextures), selectedCats);
@@ -2780,21 +2752,11 @@ window.addEventListener("drop", e=>{
 
 /* ---------- Phase 2: Bewerten ---------- */
 let rateList = [], rateIdx = 0;   // aktuelle Liste + Position
-let snapshotXP = 0, sessionStart = new Map(), pendingReport = null;
-let sessionPopIds = new Set();    // zu Sessionbeginn eingefrorene Population (id-Set) für die Delta-Rechnung
+let snapshotEarnedXP = 0, sessionStart = new Map(), pendingReport = null;
 let pendingAnim = false, statusAnimating = false, lastShownXP = 0, audioCtx = null;
 
-// XP über die eingefrorene Session-Population (sessionPopIds). Gleiches xpValue zum Start
-// (snapshotXP) wie zum Ende (buildReport/Animation): identische Mitgliedschaft + identisches
-// Wertmaß, ein Mid-Session-Exclude eines re-uploadeten Reps wiegt beidseitig prevRating -> Delta 0.
-function sessionXP(){
-  let sum = 0;
-  sessionPopIds.forEach(id=>{ const t = texById.get(id); if(t) sum += xpValue(t); });
-  return sum + groupBonusXP();
-}
-
 // Session starten. Menge = Population (effectiveRatable) mit Rating null zum Start.
-// onlyFlagged=true -> zusätzlich nur neue & geänderte. snapshotXP + prevRating festhalten.
+// onlyFlagged=true -> zusätzlich nur neue & geänderte. earnedXP-Stand + prevRating festhalten.
 async function startRating(onlyFlagged=false){
   ensureAudio();
   rateList = allTextures
@@ -2804,14 +2766,8 @@ async function startRating(onlyFlagged=false){
   if(rateList.length === 0){
     setStatus(onlyFlagged ? "Nichts Neues/Geändertes." : "Nichts offen."); return;
   }
-  // Population als id-Set einfrieren: Start und Ende der Delta-Rechnung nutzen damit
-  // identische Mitgliedschaft. Ein Mid-Session-Exclude verschiebt keine Seite -> das
-  // Delta bleibt rein bewertungsbezogen.
-  sessionPopIds = new Set(dashPopulation().map(t=> t.id));
-  // snapshotXP = XP der eingefrorenen Population zum Start (xpValue zählt re-uploadete
-  // Texturen ab prevRating). Gruppen-Bonus ist während der Session konstant und kürzt
-  // sich aus dem Delta -> Headline = Summe der Listen-Deltas.
-  snapshotXP = sessionXP();
+  // earnedXP ist monoton -> Session-Delta = earnedXP minus Startstand, nie negativ.
+  snapshotEarnedXP = earnedXP;
   sessionStart = new Map();
   rateList.forEach(t=> sessionStart.set(t.id, { prevRating: t.prevRating != null ? t.prevRating : null }));
   rateIdx = 0;
