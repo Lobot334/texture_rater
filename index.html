@@ -1012,7 +1012,7 @@ async function handleZip(blob){
         const b64 = abToB64(buf);
         toPut.push({
           id: f.name, name: baseName(f.name), category: deriveCategory(f.name),
-          hash, dataUrl: await makeDataUrl(b64), rating: null, flag: "new",
+          hash, dataUrl: await makeDataUrl(b64), rating: null, bestRating: null, flag: "new",
           isDefault: baseline[normPath(f.name)] === hash
         });
         cNew++;
@@ -1026,6 +1026,9 @@ async function handleZip(blob){
         if(old.dataUrl && old.prevDataUrl == null) old.prevDataUrl = old.dataUrl;
         if(old.rating != null && old.prevRating == null) old.prevRating = old.rating;
         old.rating = null;                         // muss neu bewertet werden (alt/neu)
+        // bestRating bewusst NICHT zurücksetzen: die Textur war schon einmal so gut.
+        // Neue XP gibt es nach der Neubewertung erst oberhalb des alten Bestwerts
+        // (max-Logik in applyRating gegen den erhaltenen bestRating).
         old.dataUrl = await makeDataUrl(b64);
         old.hash = hash;
         old.flag = "changed";
@@ -1168,13 +1171,15 @@ async function applyRating(t, newRating){
   const oldVal = t.prevRating != null ? t.prevRating
                : (t.rating == null ? 0 : t.rating);
   const newVal = newRating == null ? 0 : newRating;
+  const prevBest = t.bestRating != null ? t.bestRating : 0;
   t.rating = newRating;
   t.prevRating = null;
   t.prevDataUrl = null;
   if(oldVal !== newVal){
     await logRatingEvent(t, oldVal, newVal);
-    // monotoner Akkumulator: nur positive Deltas zählen, Absenkungen ändern earnedXP nicht
-    const gain = Math.max(0, newVal - oldVal);
+    // monotoner Akkumulator: XP nur für das, was über den bisherigen Höchststand
+    // hinausgeht — Runter- und wieder Hochbewerten erzeugt so keine neue XP
+    const gain = Math.max(0, newVal - Math.max(prevBest, oldVal));
     if(gain > 0){
       earnedXP += gain;
       await putOne("settings", {key:"earnedXP", value:earnedXP});
@@ -1182,6 +1187,8 @@ async function applyRating(t, newRating){
     ratingsSinceExport++;                                 // Backup-Erinnerung speist sich daraus
     await putOne("settings", {key:"ratingsSinceExport", value:ratingsSinceExport});
   }
+  // Bestwert mitziehen (auch bei gain 0 konsistent); nie Bewertetes bleibt null
+  if(newVal > prevBest) t.bestRating = newVal;
   await putOne("textures", t);
 }
 
@@ -2521,6 +2528,13 @@ async function onCategoryToggle(){
 // Zustand aus DB laden und alles zeichnen
 async function refresh(){
   allTextures = await getAll("textures");
+  // Migration (Erstlauf): bestRating nachtragen — der aktuelle Wert gilt als bisheriger
+  // Höchststand, damit nichts rückwirkend nachzahlt. earnedXP bleibt unberührt.
+  const noBest = allTextures.filter(t=> t.bestRating === undefined);
+  if(noBest.length){
+    noBest.forEach(t=> t.bestRating = t.rating != null ? t.rating : null);
+    await putAll("textures", noBest);
+  }
   const setting = await getOne("settings", "selectedCategories");
   selectedCats = new Set(setting ? setting.value : ["block","item"]);
   const bl = await getOne("settings", "baseline");
