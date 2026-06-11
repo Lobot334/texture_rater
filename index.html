@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MC Texture Rater</title>
+<link rel="icon" href="favicon.ico">
 <!-- Einzige externe Abhängigkeit: JSZip per CDN -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
@@ -416,6 +417,10 @@
   .sp-rank{font-size:38px; font-weight:800; line-height:1.05; white-space:nowrap}
   .sp-rank small{display:block; font-size:12px; letter-spacing:3px; color:var(--muted); font-weight:400; margin-top:4px}
   .sp-xp{margin-top:22px}
+  .sp-xp-head{
+    display:flex; justify-content:space-between; align-items:baseline; gap:12px;
+    margin-bottom:8px; font-variant-numeric:tabular-nums;
+  }
   .sp-xpbar{
     height:22px; border-radius:12px; background:rgba(128,128,134,.22);
     overflow:hidden; border:1px solid var(--border); width:100%;
@@ -425,23 +430,48 @@
     box-shadow:0 0 14px rgba(91,156,255,.6);
   }
   .sp-xpnums{
-    margin-top:10px; display:flex; align-items:baseline; gap:12px; flex-wrap:wrap;
+    margin-top:8px; display:flex; align-items:baseline; gap:12px; flex-wrap:wrap;
     font-variant-numeric:tabular-nums;
   }
-  .sp-xp-primary{font-size:21px; font-weight:700; color:var(--fg)}
+  .sp-xp-primary{
+    font-size:22px; font-weight:800; color:var(--fg);
+    text-shadow:0 0 12px rgba(91,156,255,.45);
+  }
   .sp-xp-next{font-size:13px; color:var(--muted)}
-  .sp-xp-total{font-size:15px; color:var(--muted); margin-left:auto}
+  .sp-xp-total{font-size:13px; color:var(--muted); margin-left:auto}
   .sp-xp-caption{margin-top:12px; text-align:center; font-size:15px; color:var(--muted); font-variant-numeric:tabular-nums}
   .sp-xp-caption .cap-delta{color:#5fe0c0; font-weight:700; margin-left:6px; text-shadow:0 0 10px rgba(95,224,192,.5)}
-  .sp-ranks{display:flex; gap:6px; margin-top:18px; width:100%}
+  .sp-ranks{display:flex; gap:6px; margin-top:20px; width:100%}
   .sp-rankseg{
-    flex:1; text-align:center; font-size:14px; padding:9px 4px; border-radius:6px;
+    position:relative; overflow:hidden;
+    flex:1; min-width:0; text-align:center; padding:8px 4px; border-radius:6px;
     border:1px solid var(--border); color:var(--muted); background:var(--panel2);
+  }
+  .sp-rs-fill{
+    position:absolute; left:0; bottom:0; height:3px; display:block;
+    border-radius:0 2px 2px 0;
+  }
+  .sp-rank-progress{
+    margin-top:10px; text-align:center; font-size:12px; color:var(--muted);
+    font-variant-numeric:tabular-nums;
+  }
+  .sp-rs-name{
+    display:block; font-size:14px; font-weight:600;
     overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   }
-  .sp-rankseg.done{opacity:.75}
-  .sp-rankseg.cur{border-width:2px; font-weight:800; box-shadow:0 0 14px rgba(91,156,255,.35)}
+  .sp-rs-range{
+    display:block; margin-top:2px; font-size:11px; color:var(--muted);
+    font-variant-numeric:tabular-nums; white-space:nowrap;
+  }
+  .sp-rankseg.cur{border-width:2px; padding:7px 3px}
+  .sp-rankseg.cur .sp-rs-name{font-weight:800; text-shadow:0 0 9px currentColor}
+  .sp-rankseg.cur .sp-rs-range{color:var(--fg); opacity:.75}
   .sp-rankseg.future{opacity:.4}
+  /* 11 Segmente nebeneinander: bei schmaler Breite Schrift statt Umbruch verkleinern */
+  @media(max-width:1100px){
+    .sp-rs-name{font-size:12px}
+    .sp-rs-range{font-size:10px}
+  }
   .sp-stats{
     display:grid; gap:8px; margin-top:16px;
     grid-template-columns:repeat(auto-fit, minmax(120px,1fr));
@@ -1898,24 +1928,42 @@ function setPanel(level, widthPct, totalXP){
   const num = $("sp-level-num"); if(num) num.textContent = level;
   const fill = $("sp-xpfill"); if(fill) fill.style.width = Math.max(0, Math.min(100, widthPct)) + "%";
   const xpInLevel = Math.round(totalXP - level*XP_PER_LEVEL);
-  const pr = $("sp-xp-primary"); if(pr) pr.textContent = `${fmtNum(xpInLevel)} / ${XP_PER_LEVEL}`;
+  const pr = $("sp-xp-primary"); if(pr) pr.textContent = `${fmtNum(xpInLevel)} / ${XP_PER_LEVEL} XP`;
   const nx = $("sp-xp-next");    if(nx) nx.textContent = `bis Level ${level+1}`;
   const tot = $("sp-xp-total");  if(tot) tot.textContent = `gesamt ${fmtNum(totalXP)} XP`;
 }
-// Rangfarbe als gedämpfter Tint (für aktiven Leiter-Schritt)
-function rankTint(hex){
+// Rangfarbe als gedämpfter Tint (für Leiter-Akzente), Alpha wählbar
+function rankTint(hex, a){
   const n = parseInt(hex.slice(1), 16);
-  return `rgba(${n>>16},${(n>>8)&255},${n&255},.18)`;
+  return `rgba(${n>>16},${(n>>8)&255},${n&255},${a != null ? a : .18})`;
 }
-// Rangleiter-Segmente; aktiver Rang mit Rangfarbe-Tint + farbigem Rahmen.
-function rankSegsHtml(curIdx){
+// Levelbereich eines Rang-Segments: "0-9" … "90-99", Netherit "100+"
+function rankRange(i){ return i < 10 ? `${i*10}-${i*10+9}` : "100+"; }
+// Rangleiter-Segmente aus dem Level: done = durchlaufen (Rang-Eigenfarbe als
+// dezenter Akzent), cur = leuchtend mit Tint + Glow, future = ausgegraut.
+function rankSegsHtml(level){
+  const curIdx = Math.min(10, Math.floor(level/10));
   return RANK_NAMES.map((nm,i)=>{
     const cls = i < curIdx ? "done" : i === curIdx ? "cur" : "future";
-    const style = i === curIdx
-      ? `border-color:${RANK_COLORS[i]}; color:${RANK_COLORS[i]}; background-color:${rankTint(RANK_COLORS[i])}`
-      : "";
-    return `<div class="sp-rankseg ${cls}" style="${style}">${nm}</div>`;
+    const c = RANK_COLORS[i];
+    let style = "", fill = "";
+    if(i === curIdx){
+      style = `border-color:${c}; color:${c}; background-color:${rankTint(c)}; box-shadow:0 0 16px ${rankTint(c,.45)}`;
+      // In-Rang-Fortschritt am unteren Rand (inRank/10); Netherit ist offen -> kein Fill
+      if(level < 100)
+        fill = `<i class="sp-rs-fill" style="width:${(level - curIdx*10) * 10}%; background:${c}"></i>`;
+    }else if(i < curIdx){
+      style = `border-color:${rankTint(c,.5)}; color:${rankTint(c,.85)}; background-color:${rankTint(c,.08)}`;
+    }
+    return `<div class="sp-rankseg ${cls}" style="${style}">`
+      + `<span class="sp-rs-name">${nm}</span>`
+      + `<span class="sp-rs-range">${rankRange(i)}</span>${fill}</div>`;
   }).join("");
+}
+// Caption unter der Leiter: Position im aktuellen Rang, Netherit als offene Stufe
+function rankProgressText(level){
+  if(level >= 100) return `Netherit Stufe ${level - 100}`;
+  return `In diesem Rang: Level ${level % 10 + 1} von 10`;
 }
 // Status-Hero (Punkt 2): identisch in Dashboard und Abschluss.
 // snap (snapshotEarnedXP) optional: nur im Abschluss uebergeben -> Bewegungs-Caption unterm Balken.
@@ -1938,15 +1986,18 @@ function statusHeroHtml(li, snap){
           ${rankLabel(li.level)}<small>Rang</small></div>
       </div>
       <div class="sp-xp">
+        <div class="sp-xp-head">
+          <span class="sp-xp-next" id="sp-xp-next">bis Level ${li.level+1}</span>
+          <span class="sp-xp-primary" id="sp-xp-primary">${fmtNum(li.xpInLevel)} / ${XP_PER_LEVEL} XP</span>
+        </div>
         <div class="sp-xpbar"><div class="sp-xpfill" id="sp-xpfill" style="width:${(li.progress*100).toFixed(1)}%"></div></div>
         <div class="sp-xpnums">
-          <span class="sp-xp-primary" id="sp-xp-primary">${fmtNum(li.xpInLevel)} / ${XP_PER_LEVEL}</span>
-          <span class="sp-xp-next" id="sp-xp-next">bis Level ${li.level+1}</span>
           <span class="sp-xp-total" id="sp-xp-total">gesamt ${fmtNum(li.totalXP)} XP</span>
         </div>
         ${captionHtml}
       </div>
-      <div class="sp-ranks" id="sp-ranks">${rankSegsHtml(li.rankIndex)}</div>
+      <div class="sp-ranks" id="sp-ranks">${rankSegsHtml(li.level)}</div>
+      <div class="sp-rank-progress" id="sp-rank-progress">${rankProgressText(li.level)}</div>
     </div>`;
 }
 function updateRank(level){
@@ -1954,7 +2005,9 @@ function updateRank(level){
   const rk = $("sp-rank");
   if(rk){ rk.style.color = RANK_COLORS[idx]; rk.innerHTML = `${rankLabel(level)}<small>Rang</small>`; }
   const box = $("sp-ranks");
-  if(box) box.innerHTML = rankSegsHtml(idx);
+  if(box) box.innerHTML = rankSegsHtml(level);
+  const rp = $("sp-rank-progress");
+  if(rp) rp.textContent = rankProgressText(level);
 }
 function flashClass(el, cls, ms){
   if(!el) return;
@@ -1964,8 +2017,9 @@ function flashClass(el, cls, ms){
 function fxLevelUp(newLevel, rankUp){
   flashClass($("sp-level-num"), rankUp ? "rankpulse" : "lvlpulse", rankUp ? 650 : 420);
   flashClass($("status-panel-el"), rankUp ? "rankflash" : "lvlflash", rankUp ? 850 : 520);
-  if(rankUp){ updateRank(newLevel); soundRankUp(); }   // Rang-Up: Farbe + Akkord
-  else soundLevelUp();                                  // Level-Up: Dreiklang
+  updateRank(newLevel);                  // Leiter-Fill + In-Rang-Caption laufen je Level mit
+  if(rankUp) soundRankUp();              // Rang-Up: Akkord
+  else soundLevelUp();                   // Level-Up: Dreiklang
 }
 // Segmentweise von fromXP -> toXP, an jeder Levelgrenze Level-Up, Balken auf 0.
 // Nur aufwärts: toXP >= fromXP ist durch die earnedXP-Monotonie garantiert.
