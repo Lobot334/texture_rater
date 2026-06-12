@@ -182,7 +182,8 @@
   /* ---- Phase 3: Statistik + Filter ---- */
   #filterbar:empty{display:none}
   /* Ansichts-Sektionen: hidden schlägt jedes display (Fallstrick wie #rater) */
-  #view-rate[hidden], #view-dashboard[hidden], #view-reports[hidden], #view-finish[hidden]{display:none}
+  #view-rate[hidden], #view-dashboard[hidden], #view-achievements[hidden],
+  #view-reports[hidden], #view-finish[hidden]{display:none}
   /* Diff-Zeile (Re-Upload-Zusammenfassung) */
   #statusbar{
     display:flex; justify-content:flex-end; align-items:center;
@@ -486,33 +487,124 @@
   .dash-done-fill{height:100%; border-radius:6px; background:#1D9E75; transition:width .15s}
   .dash-done .hint{margin-top:6px; font-size:12px; color:var(--muted)}
   /* Karten-Grid */
-  .dash-cards{display:grid; gap:14px; grid-template-columns:1fr}
+  .dash-cards{display:grid; gap:16px; grid-template-columns:1fr}
   @media(min-width:860px){ .dash-cards{grid-template-columns:1fr 1fr} }
-  .dash-card{background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:14px}
-  .dash-card h3{margin:0 0 10px; font-size:14px; font-weight:600}
+  .dash-card{background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:16px 18px}
+  .dash-card h3{
+    margin:0 0 12px; font-size:12px; font-weight:600;
+    letter-spacing:2px; text-transform:uppercase; color:var(--muted);
+  }
   .dash-card.wide{grid-column:1/-1}
+  /* Verlauf-Karte = Blickfang: gleiches Gradient-Finish wie Hero/Status-Panel */
+  #verlauf-card{background:linear-gradient(180deg,#161b26,#12151c); border-radius:12px}
   .streak-flames{display:flex; gap:24px; align-items:baseline; flex-wrap:wrap}
   .streak-flames .big{font-size:32px; font-weight:800}
   .streak-flames .sub{font-size:12px; color:var(--muted)}
-  /* Heatmap */
-  .hm-wrap{display:flex; gap:3px; overflow-x:auto; padding-bottom:4px}
-  .hm-col{display:flex; flex-direction:column; gap:3px}
-  .hm-cell{width:14px; height:14px; border-radius:3px; background:rgba(128,128,134,.18)}
-  .hm-cell.empty{background:transparent}
-  .hm-readout{margin-top:8px; font-size:12px; color:var(--muted); min-height:16px}
-  .hm-forecast{margin-top:10px; font-size:13px; padding-top:10px; border-top:1px solid var(--border)}
-
-  /* ---- Erfolge (Achievements) ---- */
-  .ach-grid{display:grid; gap:10px; grid-template-columns:repeat(auto-fit, minmax(160px,1fr))}
-  .ach-cell{
-    background:var(--panel2); border:1px solid var(--border); border-radius:8px;
-    padding:12px 14px; text-align:center; opacity:.5; transition:opacity .15s, border-color .15s;
+  /* ---- Verlauf-Karte (SVG-Graph) ---- */
+  .chart-head{
+    display:flex; align-items:center; justify-content:space-between;
+    gap:10px 16px; flex-wrap:wrap; margin-bottom:12px;
   }
-  .ach-cell.on{opacity:1; border-color:#ffcc44}
-  .ach-cell-ico{display:inline-block; color:var(--muted)}
-  .ach-cell.on .ach-cell-ico{color:#ffcc44}
-  .ach-cell-n{font-size:15px; font-weight:600; margin-top:6px}
-  .ach-cell-d{font-size:12px; color:var(--muted); margin-top:4px}
+  .chart-head h3{margin:0}
+  .chart-controls{display:flex; align-items:center; gap:10px; flex-wrap:wrap}
+  .chart-controls .segbtn{padding:5px 11px; font-size:12px}
+  .chart-nav{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:12px}
+  .chart-nav button{padding:4px 11px; font-size:13px}
+  .chart-nav select{
+    background:var(--panel2); color:var(--fg); border:1px solid var(--border);
+    border-radius:6px; padding:5px 9px; font:inherit; max-width:240px;
+  }
+  .chart-svg{width:100%; height:auto; display:block}
+  .chart-legend{display:flex; gap:18px; margin-top:8px; font-size:12px; color:var(--muted)}
+  .chart-legend i{
+    display:inline-block; width:10px; height:10px; border-radius:3px;
+    margin-right:6px; vertical-align:-1px;
+  }
+  .chart-empty{padding:36px 0; text-align:center; color:var(--muted)}
+
+  /* ---- Prognose-Panel (Ziel Level 100) ---- */
+  /* Teal-Ableitung des Status-Panel-Stils (gleiche Glow/Shadow-Technik, Töne aus #5fe0c0) */
+  .forecast-panel{
+    position:relative; grid-column:1/-1; border-radius:12px; padding:18px 20px;
+    border:1px solid rgba(95,224,192,.3);
+    background:
+      radial-gradient(120% 120% at 50% -20%, rgba(95,224,192,.10), transparent 60%),
+      linear-gradient(180deg,#161b26,#12151c);
+    box-shadow:inset 0 0 28px rgba(95,224,192,.07), 0 0 0 1px rgba(95,224,192,.05);
+  }
+  .fp-tag{
+    font-size:11px; letter-spacing:3px; color:#5fe0c0; text-transform:uppercase;
+    margin-bottom:14px; text-shadow:0 0 8px rgba(95,224,192,.6);
+  }
+  .fp-main{
+    font-size:30px; font-weight:800; line-height:1.1; color:#fff;
+    text-shadow:0 0 16px rgba(95,224,192,.45); font-variant-numeric:tabular-nums;
+  }
+  .fp-main.fp-dim{color:var(--muted); text-shadow:none}
+  .fp-sub{margin-top:6px; font-size:13px; color:var(--muted); font-variant-numeric:tabular-nums}
+  .fp-stats{
+    display:grid; gap:8px; margin-top:14px;
+    grid-template-columns:repeat(auto-fit, minmax(140px,1fr));
+  }
+  .fp-stats>div{background:var(--panel2); border:1px solid var(--border); border-radius:8px; padding:10px 12px}
+  .fp-stats b{display:block; font-size:22px; color:var(--fg); font-variant-numeric:tabular-nums}
+  .fp-stats span{font-size:11px; color:var(--muted)}
+  .fp-bar-lab{
+    display:flex; justify-content:space-between; margin-top:16px; margin-bottom:6px;
+    font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums;
+  }
+  .fp-track{
+    height:10px; border-radius:6px; background:rgba(128,128,134,.22);
+    overflow:hidden; border:1px solid var(--border);
+  }
+  .fp-fill{
+    height:100%; border-radius:6px; background:linear-gradient(90deg,#1D9E75,#5fe0c0);
+    box-shadow:0 0 12px rgba(95,224,192,.55);
+  }
+
+  /* ---- Erfolge-Seite (#view-achievements) ---- */
+  .achv-head{
+    display:flex; align-items:center; justify-content:space-between; gap:18px 28px;
+    flex-wrap:wrap; margin-bottom:18px; padding:20px 22px; border-radius:12px;
+    border:1px solid var(--border);
+    background:linear-gradient(180deg,#161b26,#12151c);
+  }
+  .achv-title{font-size:22px; font-weight:800}
+  .achv-sub{color:var(--muted); font-size:13px; margin-top:4px; font-variant-numeric:tabular-nums}
+  .achv-head-bar{
+    flex:1; min-width:220px; height:8px; border-radius:6px;
+    background:rgba(128,128,134,.22); overflow:hidden;
+  }
+  .achv-head-bar>div{
+    height:100%; border-radius:6px; background:#ffcc44;
+    box-shadow:0 0 10px rgba(255,204,68,.55);
+  }
+  .achv-grid{display:grid; gap:14px; grid-template-columns:repeat(auto-fill, minmax(280px,1fr))}
+  .achv-card{
+    display:flex; gap:14px; align-items:flex-start; padding:16px 18px;
+    background:var(--panel); border:1px solid var(--border); border-radius:10px;
+    opacity:.55; transition:opacity .15s, border-color .15s, box-shadow .15s;
+  }
+  .achv-card.on{
+    opacity:1; border-color:#ffcc44;
+    box-shadow:0 0 14px rgba(255,204,68,.12), inset 0 0 20px rgba(255,204,68,.05);
+  }
+  .achv-ico{color:var(--muted); flex:0 0 auto; margin-top:2px}
+  .achv-card.on .achv-ico{color:#ffcc44; filter:drop-shadow(0 0 6px rgba(255,204,68,.6))}
+  .achv-body{flex:1; min-width:0}
+  .achv-n{font-size:15px; font-weight:700}
+  .achv-d{font-size:12px; color:var(--muted); margin-top:3px}
+  .achv-state{
+    margin-top:10px; font-size:11px; letter-spacing:1.5px;
+    text-transform:uppercase; color:#ffcc44;
+  }
+  .achv-prog{display:flex; align-items:center; gap:8px; margin-top:12px}
+  .achv-track{flex:1; height:5px; border-radius:4px; background:rgba(128,128,134,.22); overflow:hidden}
+  .achv-fill{height:100%; border-radius:4px; background:var(--accent)}
+  .achv-num{
+    font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums;
+    white-space:nowrap;
+  }
   /* Unlock-Toast */
   .ach-toast{
     position:fixed; right:18px; bottom:18px; z-index:300;
@@ -645,6 +737,7 @@
     <div class="seg" id="view-switch">
       <button class="segbtn" data-view="rate">Bewerten</button>
       <button class="segbtn" data-view="dashboard">Dashboard</button>
+      <button class="segbtn" data-view="achievements">Erfolge</button>
       <button class="segbtn" data-view="reports">Berichte</button>
     </div>
   </div>
@@ -680,6 +773,9 @@
   </section>
   <section id="view-dashboard" hidden>
     <div id="dashboard"></div>
+  </section>
+  <section id="view-achievements" hidden>
+    <div id="achievements"></div>
   </section>
   <section id="view-reports" hidden>
     <div id="reports"></div>
@@ -1259,6 +1355,9 @@ let achievementsUnlocked = new Set(); // freigeschaltete Erfolg-IDs (persistiert
 let lastExportAt = null;              // ISO-Zeit des letzten Backups (persistiert)
 let ratingsSinceExport = 0;           // echte Wertänderungen seit letztem Backup (persistiert)
 let earnedXP = 0;                     // monotoner XP-Akkumulator: Summe positiver Rating-Deltas (persistiert)
+let chartMetric = "cumxp";            // Verlauf-Karte: cumxp | xpday | textures (persistiert)
+let chartRange = "week";              // Verlauf-Karte: week | month | year (persistiert)
+let chartAnchor = null;               // Anker-Tag (YYYY-MM-DD) des sichtbaren Fensters; null = heute (nicht persistiert)
 
 // Sektion sortieren: alpha nach Name, sonst nach effectiveRating (auf-/absteigend),
 // Gleichstand nach Name. effectiveRating = rating ?? 0 -> Unbewertete sind 0.
@@ -1817,8 +1916,6 @@ const RANK_NAMES = ["Holz","Stein","Bronze","Eisen","Gold","Redstone","Lapis",
                     "Smaragd","Amethyst","Diamant","Netherit"];   // Index 0..9 = Level 0..99, 10 = Netherit ab 100
 const RANK_COLORS = ["#9c6b3f","#9aa0ab","#cd7f32","#cdd2da","#ffcc44","#e24b4a",
                      "#3a6ea5","#1d9e75","#9b6dd6","#5fd0e6","#7d6b78"];
-const HEAT_WEEKS = 15;                           // Spalten der Heatmap
-const HEAT_COLORS = ["", "#9FE1CB", "#5DCAA5", "#1D9E75", "#0F6E56"];  // Stufe 0 = neutraler Track
 
 // Population exakt wie Durchschnitt + Tier-Leiter: Repräsentanten, kein Default, kein exclude.
 function dashPopulation(){ return allTextures.filter(effectiveRatable); }
@@ -2188,6 +2285,7 @@ async function renderFinish(){
 function showFinish(){
   $("view-rate").hidden = true;
   $("view-dashboard").hidden = true;
+  $("view-achievements").hidden = true;
   $("view-reports").hidden = true;
   $("view-finish").hidden = false;
   $("dashboard").innerHTML = "";   // doppelte Hero-IDs vermeiden
@@ -2249,32 +2347,416 @@ async function maybeFinish(){
   await finishSession();
   return true;
 }
-function shiftDay(key, delta){
+// "YYYY-MM-DD" -> lokales Date (Mitternacht)
+function dayDate(key){
   const [y,m,d] = key.split("-").map(Number);
-  return localDay(new Date(y, m-1, d + delta));
+  return new Date(y, m-1, d);
+}
+function shiftDay(key, delta){
+  const d = dayDate(key);
+  return localDay(new Date(d.getFullYear(), d.getMonth(), d.getDate() + delta));
 }
 function startOfWeek(d){                          // Wochenstart Montag
   const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
   return x;
 }
-// date -> {points: Summe positiver Deltas}. Alt-Events ohne date über ts ableiten.
-function buildDayMap(events){
-  const m = new Map();
-  events.forEach(e=>{
+// Lückenlose Tagesreihe aus dem Event-Log: ein Eintrag pro Tag, vom ersten
+// Event-Tag bis heute. Fundament für Verlauf-Graph und Prognose.
+// Caveat: die Reihe reicht nur so weit zurück, wie ratingEvents existiert.
+// cumXP ist die historische Summe aller positiven Deltas — sie kann vom
+// aktuellen earnedXP abweichen (Bestwert-Logik zahlt nicht jede positive
+// Bewegung aus, die Migration setzte eine eigene Baseline) und ist hier
+// bewusst die Verlaufsgröße, nicht der Kontostand.
+function buildDailySeries(events){
+  const evs = events.slice().sort((a,b)=> a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0);
+  const byDay = new Map();                        // Tag -> Events des Tages (ts-Reihenfolge)
+  evs.forEach(e=>{
     const d = e.date || (e.ts ? localDay(new Date(e.ts)) : null);
     if(!d) return;
-    let rec = m.get(d); if(!rec){ rec = {points:0}; m.set(d, rec); }
-    if(e.delta > 0) rec.points += e.delta;
+    if(!byDay.has(d)) byDay.set(d, []);
+    byDay.get(d).push(e);
   });
-  return m;
+  const series = [];
+  if(byDay.size === 0) return series;
+  const ratings = new Map();                      // id -> fortgeschriebenes Rating
+  let cumXP = 0;
+  const today = localDay(new Date());
+  let day = [...byDay.keys()].sort()[0];
+  while(day <= today){
+    let xpGained = 0, newCount = 0, reworkedCount = 0;
+    (byDay.get(day) || []).forEach(e=>{
+      if(e.delta > 0){ xpGained += e.delta; cumXP += e.delta; }
+      if(e.old === 0) newCount++;                 // erstmals von 0 weg bewertet
+      else if(e.old > 0) reworkedCount++;         // bereits bewertete verändert
+      // new 0 = Rating entfernt -> Eintrag raus, damit rated/decent live bleiben
+      if(e.new === 0) ratings.delete(e.id); else ratings.set(e.id, e.new);
+    });
+    let decent = 0;
+    ratings.forEach(v=>{ if(v >= 50) decent++; });
+    series.push({date:day, xpGained, newCount, reworkedCount, cumXP, decent, rated:ratings.size});
+    day = shiftDay(day, 1);
+  }
+  return series;
 }
-function heatLevel(pts){
-  if(pts <= 0) return 0;
-  if(pts < 40) return 1;
-  if(pts < 80) return 2;
-  if(pts < 150) return 3;
-  return 4;
+
+/* ---------- Verlauf-Karte: Fenster, Aggregation, SVG von Hand ---------- */
+const MONTH_NAMES = ["Januar","Februar","März","April","Mai","Juni",
+                     "Juli","August","September","Oktober","November","Dezember"];
+const MONTH_SHORT = ["Jan","Feb","Mär","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"];
+const DAY_SHORT = ["So","Mo","Di","Mi","Do","Fr","Sa"];
+const CHART_METRICS = [["cumxp","XP gesamt"],["xpday","XP pro Tag"],["textures","Texturen"]];
+const CHART_RANGES = [["week","Woche"],["month","Monat"],["year","Jahr"]];
+
+function weekLabel(startKey){
+  const a = dayDate(startKey), b = dayDate(shiftDay(startKey, 6));
+  return `${a.getDate()}.${a.getMonth()+1}.–${b.getDate()}.${b.getMonth()+1}.${b.getFullYear()}`;
+}
+function monthLabel(mk){ const [y,m] = mk.split("-").map(Number); return `${MONTH_NAMES[m-1]} ${y}`; }
+// Tooltip-Beschriftung eines Slots (Tag oder Monat)
+function slotLabel(kind, key){
+  if(kind === "month") return monthLabel(key);
+  const d = dayDate(key);
+  return `${DAY_SHORT[d.getDay()]} ${d.getDate()}.${d.getMonth()+1}.${d.getFullYear()}`;
+}
+
+// Sichtbares Fenster aus chartRange + chartAnchor: Slot-Schlüssel (Tage bzw. Monate).
+// week/month -> Tagesslots, year -> 12 Monatsslots (bewusst gröber).
+function chartWindow(){
+  const anchor = chartAnchor || localDay(new Date());
+  if(chartRange === "week"){
+    const start = localDay(startOfWeek(dayDate(anchor)));
+    return {kind:"day", keys: Array.from({length:7}, (_,i)=> shiftDay(start, i)),
+            period: start};
+  }
+  if(chartRange === "month"){
+    const d = dayDate(anchor), y = d.getFullYear(), m = d.getMonth();
+    const n = new Date(y, m+1, 0).getDate();
+    return {kind:"day", keys: Array.from({length:n}, (_,i)=> localDay(new Date(y, m, i+1))),
+            period: `${y}-${String(m+1).padStart(2,"0")}`};
+  }
+  const y = dayDate(anchor).getFullYear();
+  return {kind:"month", keys: Array.from({length:12}, (_,i)=> `${y}-${String(i+1).padStart(2,"0")}`),
+          period: String(y)};
+}
+
+// kumulierte XP am Ende von limitKey; "-99" als Tagesteil deckt Monatsenden ab
+function cumAtEnd(series, limitKey){
+  let cum = 0;
+  for(const s of series){ if(s.date <= limitKey) cum = s.cumXP; else break; }
+  return cum;
+}
+// Schlüsselgrenze des Zeitraums direkt vor dem Fenster (für Level-Marker-Anschluss)
+function prevLimit(win){
+  if(win.kind === "day") return shiftDay(win.keys[0], -1);
+  const [y,m] = win.keys[0].split("-").map(Number);
+  return (m === 1 ? `${y-1}-12` : `${y}-${String(m-1).padStart(2,"0")}`) + "-99";
+}
+
+// Slot-Werte fürs Fenster. Tag: direkter Serieneintrag (vor Serienbeginn 0,
+// nach heute future). Monat: Summen je Monat, cumXP als Monatsendwert.
+function chartPoints(series, win){
+  const todayKey = localDay(new Date());
+  if(win.kind === "day"){
+    const byDate = new Map(series.map(s=>[s.date, s]));
+    return win.keys.map(k=>{
+      const e = byDate.get(k);
+      return {key:k, future: k > todayKey,
+        xpGained: e ? e.xpGained : 0, newCount: e ? e.newCount : 0,
+        reworkedCount: e ? e.reworkedCount : 0, cumXP: e ? e.cumXP : cumAtEnd(series, k)};
+    });
+  }
+  const agg = new Map();
+  series.forEach(s=>{
+    const mk = s.date.slice(0,7);
+    let a = agg.get(mk); if(!a){ a = {xpGained:0, newCount:0, reworkedCount:0}; agg.set(mk, a); }
+    a.xpGained += s.xpGained; a.newCount += s.newCount; a.reworkedCount += s.reworkedCount;
+  });
+  const curMonth = todayKey.slice(0,7);
+  return win.keys.map(mk=>{
+    const a = agg.get(mk) || {xpGained:0, newCount:0, reworkedCount:0};
+    return {key:mk, future: mk > curMonth, xpGained:a.xpGained, newCount:a.newCount,
+            reworkedCount:a.reworkedCount, cumXP: cumAtEnd(series, mk + "-99")};
+  });
+}
+
+// Y-Achse: Schrittweite auf runden Wert (1/2/2.5/5 x 10^k), Maximum aufgerundet
+function niceCeil(v){
+  if(v <= 0) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(v)));
+  const f = v / p;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p;
+}
+function axisScale(maxV){
+  const step = Math.max(1, niceCeil(Math.max(1, maxV) / 4));   // ganzzahlig, sonst doppelte fmtNum-Labels
+  return {step, max: Math.max(step, Math.ceil(maxV / step) * step)};
+}
+
+// SVG des Graphen für die aktuelle Metrik. Reine Theme-Farben bzw. Ableitungen
+// vorhandener Töne (accent-Blau, #1D9E75 Teal, #EF9F27 Orange, #ffcc44 Gelb).
+function chartSvg(series, pts, win){
+  const W = 1000, H = 300, mL = 58, mR = 14, mT = 26, mB = 30;
+  const pw = W - mL - mR, ph = H - mT - mB;
+  const n = pts.length, slotW = pw / n;
+  const x = i => mL + slotW * (i + 0.5);
+  const maxV = chartMetric === "cumxp"
+    ? Math.max(1, ...pts.map(p=>p.cumXP))
+    : chartMetric === "textures"
+      ? Math.max(1, ...pts.map(p=>Math.max(p.newCount, p.reworkedCount)))
+      : Math.max(1, ...pts.map(p=>p.xpGained));
+  const sc = axisScale(maxV);
+  const y = v => mT + ph * (1 - v / sc.max);
+  let out = "";
+
+  // Gridlines + Y-Labels
+  for(let v = 0; v <= sc.max; v += sc.step){
+    const yy = y(v).toFixed(1);
+    out += `<line x1="${mL}" y1="${yy}" x2="${W-mR}" y2="${yy}" stroke="var(--border)" stroke-width="1"${v === 0 ? "" : ' stroke-dasharray="3 4" opacity=".55"'}/>`
+        + `<text x="${mL-8}" y="${Number(yy)+4}" text-anchor="end" font-size="11" fill="var(--muted)">${fmtNum(v)}</text>`;
+  }
+
+  // Heute-Slot dezent hinterlegen
+  const todayKey = localDay(new Date());
+  const nowKey = win.kind === "day" ? todayKey : todayKey.slice(0,7);
+  const todaySlot = win.keys.indexOf(nowKey);
+  if(todaySlot !== -1)
+    out += `<rect x="${(mL + slotW*todaySlot).toFixed(1)}" y="${mT}" width="${slotW.toFixed(1)}" height="${ph}" fill="rgba(91,156,255,.06)"/>`;
+
+  // X-Labels: Woche alle Tage, Monat jeder 5., Jahr alle Monate
+  const xLabels = [];
+  if(chartRange === "week")
+    win.keys.forEach((k,i)=>{ const d = dayDate(k); xLabels.push([i, `${DAY_SHORT[d.getDay()]} ${d.getDate()}.${d.getMonth()+1}.`]); });
+  else if(chartRange === "month")
+    win.keys.forEach((k,i)=>{ if(i % 5 === 0) xLabels.push([i, `${i+1}.`]); });
+  else
+    win.keys.forEach((k,i)=> xLabels.push([i, MONTH_SHORT[i]]));
+  xLabels.forEach(([i,lbl])=>{
+    out += `<text x="${x(i).toFixed(1)}" y="${H-9}" text-anchor="middle" font-size="11" fill="var(--muted)">${lbl}</text>`;
+  });
+
+  if(chartMetric === "cumxp"){
+    const drawn = pts.filter(p=> !p.future);
+    if(drawn.length){
+      const line = "M" + drawn.map((p,i)=> `${x(i).toFixed(1)},${y(p.cumXP).toFixed(1)}`).join(" L");
+      const area = line + ` L${x(drawn.length-1).toFixed(1)},${y(0).toFixed(1)} L${x(0).toFixed(1)},${y(0).toFixed(1)} Z`;
+      out += `<defs><linearGradient id="cumgrad" x1="0" y1="0" x2="0" y2="1">`
+          + `<stop offset="0" stop-color="rgba(91,156,255,.30)"/>`
+          + `<stop offset="1" stop-color="rgba(91,156,255,0)"/></linearGradient></defs>`
+          + `<path d="${area}" fill="url(#cumgrad)"/>`
+          + `<path d="${line}" fill="none" stroke="var(--accent)" stroke-width="2.2" stroke-linejoin="round"/>`;
+      if(drawn.length <= 31)
+        drawn.forEach((p,i)=> out += `<circle cx="${x(i).toFixed(1)}" cy="${y(p.cumXP).toFixed(1)}" r="2.4" fill="var(--accent)"/>`);
+      // Level-Marker an jeder 700er-Schwelle, Rang-Marker (jede 10. Levelgrenze) kräftiger + Label
+      let prevCum = cumAtEnd(series, prevLimit(win));
+      drawn.forEach((p,i)=>{
+        const fromL = Math.floor(prevCum / XP_PER_LEVEL), toL = Math.floor(p.cumXP / XP_PER_LEVEL);
+        for(let L = fromL + 1; L <= toL; L++){
+          const yy = y(L * XP_PER_LEVEL);
+          if(L % 10 === 0){
+            const ty = yy - 10 < mT + 10 ? yy + 18 : yy - 10;
+            out += `<circle cx="${x(i).toFixed(1)}" cy="${yy.toFixed(1)}" r="5" fill="#ffcc44" stroke="#15171c" stroke-width="1.5"/>`
+                + `<text x="${x(i).toFixed(1)}" y="${ty.toFixed(1)}" text-anchor="middle" font-size="11" font-weight="700" fill="#ffcc44">${rankLabel(L)}</text>`;
+          }else{
+            out += `<circle cx="${x(i).toFixed(1)}" cy="${yy.toFixed(1)}" r="3" fill="#15171c" stroke="var(--accent)" stroke-width="1.8"/>`;
+          }
+        }
+        prevCum = p.cumXP;
+      });
+    }
+  }else if(chartMetric === "xpday"){
+    const bw = Math.min(26, slotW * 0.6);
+    pts.forEach((p,i)=>{
+      if(p.future || p.xpGained <= 0) return;
+      const yy = y(p.xpGained);
+      out += `<rect x="${(x(i)-bw/2).toFixed(1)}" y="${yy.toFixed(1)}" width="${bw.toFixed(1)}" height="${(y(0)-yy).toFixed(1)}" rx="2" fill="#1D9E75"/>`;
+    });
+  }else{
+    // gruppierte Balken: links neu (accent), rechts überarbeitet (orange)
+    const bw = Math.min(14, slotW * 0.28), gap = Math.min(3, slotW * 0.06);
+    pts.forEach((p,i)=>{
+      if(p.future) return;
+      if(p.newCount > 0){
+        const yy = y(p.newCount);
+        out += `<rect x="${(x(i)-bw-gap/2).toFixed(1)}" y="${yy.toFixed(1)}" width="${bw.toFixed(1)}" height="${(y(0)-yy).toFixed(1)}" rx="2" fill="var(--accent)"/>`;
+      }
+      if(p.reworkedCount > 0){
+        const yy = y(p.reworkedCount);
+        out += `<rect x="${(x(i)+gap/2).toFixed(1)}" y="${yy.toFixed(1)}" width="${bw.toFixed(1)}" height="${(y(0)-yy).toFixed(1)}" rx="2" fill="#EF9F27"/>`;
+      }
+    });
+  }
+
+  // unsichtbare Hover-Spalten für den Tooltip
+  pts.forEach((p,i)=>{
+    out += `<rect class="ch-hot" data-i="${i}" x="${(mL + slotW*i).toFixed(1)}" y="${mT}" width="${slotW.toFixed(1)}" height="${ph}" fill="transparent"/>`;
+  });
+  return `<svg class="chart-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">${out}</svg>`;
+}
+
+// Zeiträume mit Aktivität (mind. ein Event am Tag) für die Direktauswahl, neueste zuerst.
+function activePeriods(series){
+  const set = new Set();
+  series.forEach(s=>{
+    if(s.xpGained === 0 && s.newCount === 0 && s.reworkedCount === 0) return;
+    if(chartRange === "week") set.add(localDay(startOfWeek(dayDate(s.date))));
+    else if(chartRange === "month") set.add(s.date.slice(0,7));
+    else set.add(s.date.slice(0,4));
+  });
+  return [...set].sort().reverse();
+}
+function periodLabel(p){
+  if(chartRange === "week") return weekLabel(p);
+  if(chartRange === "month") return monthLabel(p);
+  return p;
+}
+function periodStart(p){
+  if(chartRange === "week") return p;
+  if(chartRange === "month") return p + "-01";
+  return p + "-01-01";
+}
+function shiftChartAnchor(dir){
+  const a = dayDate(chartAnchor || localDay(new Date()));
+  if(chartRange === "week") a.setDate(a.getDate() + dir*7);
+  else if(chartRange === "month"){ a.setDate(1); a.setMonth(a.getMonth() + dir); }
+  else { a.setMonth(0, 1); a.setFullYear(a.getFullYear() + dir); }
+  chartAnchor = localDay(a);
+}
+function chartTipText(p, win){
+  const lbl = slotLabel(win.kind, p.key);
+  if(chartMetric === "cumxp"){
+    const plus = p.xpGained > 0 ? ` · +${fmtNum(p.xpGained)}` : "";
+    return `<b>${lbl}</b> · ${fmtNum(p.cumXP)} XP gesamt${plus}`;
+  }
+  if(chartMetric === "xpday") return `<b>${lbl}</b> · +${fmtNum(p.xpGained)} XP`;
+  return `<b>${lbl}</b> · ${p.newCount} neu · ${p.reworkedCount} überarbeitet`;
+}
+
+// Verlauf-Karte komplett zeichnen (Controls, Navigation, SVG, Tooltip).
+// Re-Render bei jeder Bedienung nur dieser Karte, nicht des ganzen Dashboards.
+function renderChartCard(card, series){
+  if(!card) return;
+  const win = chartWindow();
+  const pts = chartPoints(series, win);
+  const todayKey = localDay(new Date());
+  const nowKey = win.kind === "day" ? todayKey : todayKey.slice(0,7);
+  const containsNow = win.keys[0] <= nowKey && nowKey <= win.keys[win.keys.length-1];
+  const atOrPastNow = win.keys[win.keys.length-1] >= nowKey;
+
+  const metricSeg = CHART_METRICS.map(([v,lbl])=>
+    `<button class="segbtn${chartMetric === v ? " active" : ""}" data-metric="${v}">${lbl}</button>`).join("");
+  const rangeSeg = CHART_RANGES.map(([v,lbl])=>
+    `<button class="segbtn${chartRange === v ? " active" : ""}" data-range="${v}">${lbl}</button>`).join("");
+  const periods = activePeriods(series);
+  if(!periods.includes(win.period)) periods.unshift(win.period);
+  const options = periods.map(p=>
+    `<option value="${p}"${p === win.period ? " selected" : ""}>${periodLabel(p)}</option>`).join("");
+
+  const bodyHtml = series.length
+    ? chartSvg(series, pts, win)
+    : `<div class="chart-empty">Noch keine Aktivität aufgezeichnet. Nach den ersten Bewertungen entsteht hier der Verlauf.</div>`;
+  const legendHtml = chartMetric === "textures" && series.length
+    ? `<div class="chart-legend"><span><i style="background:var(--accent)"></i>neu bewertet</span>`
+      + `<span><i style="background:#EF9F27"></i>überarbeitet</span></div>`
+    : "";
+
+  card.innerHTML = `
+    <div class="chart-head">
+      <h3>Verlauf</h3>
+      <div class="chart-controls">
+        <div class="seg">${metricSeg}</div>
+        <div class="seg">${rangeSeg}</div>
+      </div>
+    </div>
+    <div class="chart-nav">
+      <button data-nav="-1" title="Zeitraum zurück">‹</button>
+      <select id="chart-period" title="Zeitraum wählen">${options}</select>
+      <button data-nav="1" title="Zeitraum vor"${atOrPastNow ? " disabled" : ""}>›</button>
+      <button id="chart-today"${containsNow ? " disabled" : ""}>Heute</button>
+    </div>
+    ${bodyHtml}${legendHtml}
+    <div class="tl-tip" id="chart-tip"></div>`;
+
+  card.querySelectorAll("[data-metric]").forEach(b=> b.addEventListener("click", async ()=>{
+    chartMetric = b.dataset.metric;
+    await putOne("settings", {key:"chartMetric", value:chartMetric});
+    renderChartCard(card, series);
+  }));
+  card.querySelectorAll("[data-range]").forEach(b=> b.addEventListener("click", async ()=>{
+    chartRange = b.dataset.range;
+    await putOne("settings", {key:"chartRange", value:chartRange});
+    renderChartCard(card, series);
+  }));
+  card.querySelectorAll("[data-nav]").forEach(b=> b.addEventListener("click", ()=>{
+    shiftChartAnchor(Number(b.dataset.nav));
+    renderChartCard(card, series);
+  }));
+  $("chart-today").addEventListener("click", ()=>{ chartAnchor = null; renderChartCard(card, series); });
+  $("chart-period").addEventListener("change", e=>{
+    chartAnchor = periodStart(e.target.value);
+    renderChartCard(card, series);
+  });
+
+  const tip = $("chart-tip");
+  card.querySelectorAll(".ch-hot").forEach(r=>{
+    r.addEventListener("mouseenter", ()=>{
+      const p = pts[Number(r.dataset.i)];
+      if(!p || p.future){ tip.style.display = "none"; return; }
+      tip.innerHTML = chartTipText(p, win);
+      tip.style.display = "block";
+    });
+    r.addEventListener("mousemove", e=>{
+      tip.style.left = (e.clientX + 14) + "px";
+      tip.style.top  = (e.clientY + 14) + "px";
+    });
+    r.addEventListener("mouseleave", ()=>{ tip.style.display = "none"; });
+  });
+}
+
+/* ---------- Prognose: Ziel Level 100 ---------- */
+// Eigenes Panel im Dashboard. Fehlende XP bis 100*XP_PER_LEVEL, Tempo aus der
+// Tagesreihe (dailyTempo), geschätzte Tage + Zieldatum. Sonderfälle: Ziel
+// erreicht bzw. noch kein Tempo.
+function forecastPanelHtml(series){
+  const GOAL = 100 * XP_PER_LEVEL;
+  const missing = Math.max(0, GOAL - earnedXP);
+  const pct = Math.min(100, earnedXP / GOAL * 100);
+  const barHtml = `
+    <div class="fp-bar-lab">
+      <span>${fmtNum(Math.min(earnedXP, GOAL))} / ${fmtNum(GOAL)} XP</span>
+      <span>${pct.toFixed(1)} %</span>
+    </div>
+    <div class="fp-track"><div class="fp-fill" style="width:${pct.toFixed(1)}%"></div></div>`;
+  let mainHtml;
+  if(missing === 0){
+    mainHtml = `
+      <div class="fp-main">Level 100 erreicht</div>
+      <div class="fp-sub">Das Langzeitziel ist geschafft. Alles Weitere ist Bonus.</div>`;
+  }else{
+    const tempo = dailyTempo(series);
+    if(tempo <= 0){
+      mainHtml = `
+        <div class="fp-main fp-dim">Noch keine Schätzung</div>
+        <div class="fp-sub">Nach ein paar aktiven Tagen mit XP erscheint hier ein Zieldatum.</div>
+        <div class="fp-stats">
+          <div><b>${fmtNum(missing)}</b><span>XP fehlen</span></div>
+        </div>`;
+    }else{
+      const tage = Math.ceil(missing / tempo);
+      const ziel = new Date(); ziel.setDate(ziel.getDate() + tage);
+      mainHtml = `
+        <div class="fp-main">Level 100 in ~${fmtNum(tage)} Tagen</div>
+        <div class="fp-sub">voraussichtlich am ${localDay(ziel)} bei gleichbleibendem Tempo</div>
+        <div class="fp-stats">
+          <div><b>${fmtNum(missing)}</b><span>XP fehlen</span></div>
+          <div><b>~${fmtNum(tempo)}</b><span>XP pro aktivem Tag</span></div>
+          <div><b>${fmtNum(tage)}</b><span>Tage geschätzt</span></div>
+        </div>`;
+    }
+  }
+  return `<div class="forecast-panel">
+      <div class="fp-tag">Prognose · Level 100</div>
+      ${mainHtml}${barHtml}
+    </div>`;
 }
 // Aktive Tage: jeder lokale Tag mit mindestens einem ratingEvents-Eintrag.
 function activeDaySet(events){
@@ -2304,12 +2786,12 @@ function bestStreak(days){
   }
   return best;
 }
-// Tempo: mittlere tägliche Summe positiver Deltas über die letzten 14 Tage mit Aktivität.
-function dailyTempo(dayMap){
-  const active = [...dayMap.entries()].filter(([,v])=> v.points > 0)
-    .sort((a,b)=> a[0] < b[0] ? 1 : -1).slice(0, 14);
+// Tempo: mittlere XP je aktivem Tag (xpGained > 0) über die letzten 14 aktiven
+// Tage der Tagesreihe (buildDailySeries).
+function dailyTempo(series){
+  const active = series.filter(s=> s.xpGained > 0).slice(-14);
   if(active.length === 0) return 0;
-  return active.reduce((s,[,v])=> s + v.points, 0) / active.length;
+  return active.reduce((s,e)=> s + e.xpGained, 0) / active.length;
 }
 
 let lastBadgeCount = 0;
@@ -2373,8 +2855,7 @@ async function renderDashboard(){
     </div>`;
 
   // Streak: aktive Tage (jeder Tag mit mindestens einem Event)
-  const dayMap = buildDayMap(events);
-  const days   = activeDaySet(events);
+  const days = activeDaySet(events);
   const streakHtml = `
     <div class="dash-card">
       <h3>Streak</h3>
@@ -2422,61 +2903,18 @@ async function renderDashboard(){
       <div class="hint">Volle Sicht inkl. Vanilla-Default — anders als „Durchgespielt".</div>
     </div>`;
 
-  // Heatmap: Spalten = Wochen, 7 Zeilen Wochentage
-  const sow   = startOfWeek(new Date());
-  const first = new Date(sow); first.setDate(first.getDate() - (HEAT_WEEKS - 1) * 7);
-  const today = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
-  let colsHtml = "";
-  for(let c=0;c<HEAT_WEEKS;c++){
-    let col = "";
-    for(let r=0;r<7;r++){
-      const d = new Date(first); d.setDate(first.getDate() + c*7 + r);
-      if(d > today){ col += `<div class="hm-cell empty"></div>`; continue; }
-      const key = localDay(d);
-      const rec = dayMap.get(key) || {points:0};
-      const lvl = heatLevel(rec.points);
-      const bg = lvl === 0 ? "" : `background:${HEAT_COLORS[lvl]}`;
-      col += `<div class="hm-cell" style="${bg}" data-key="${key}" data-pts="${Math.round(rec.points)}"></div>`;
-    }
-    colsHtml += `<div class="hm-col">${col}</div>`;
-  }
-
-  // Prognose
-  const restauf = queue.reduce((s,t)=> s + (50 - effectiveRating(t)), 0);
-  const tempo   = dailyTempo(dayMap);
-  let forecast;
-  if(queue.length === 0){
-    forecast = "Queue leer — alles auf 50+. Nichts mehr offen.";
-  }else if(tempo <= 0){
-    forecast = `Restaufwand ${fmtNum(restauf)} Punkte · noch kein Tempo — ein paar aktive Tage, dann erscheint ein Zieldatum.`;
-  }else{
-    const tage = Math.ceil(restauf / tempo);
-    const ziel = new Date(); ziel.setDate(ziel.getDate() + tage);
-    forecast = `Restaufwand ${fmtNum(restauf)} Punkte · Tempo ~${fmtNum(tempo)}/Tag · noch ${tage} Tage → ${localDay(ziel)}`;
-  }
-  const heatHtml = `
-    <div class="dash-card wide">
-      <h3>Aktivität (Plus-Punkte je Tag)</h3>
-      <div class="hm-wrap" id="dash-heat">${colsHtml}</div>
-      <div class="hm-readout" id="dash-heat-readout">Über ein Feld fahren für Details.</div>
-      <div class="hm-forecast">Prognose: ${forecast}</div>
-    </div>`;
+  // Tagesreihe aus dem Event-Log: Fundament für Verlauf-Karte + Prognose
+  const series = buildDailySeries(events);
+  const chartShell = `<div class="dash-card wide" id="verlauf-card"></div>`;
+  const forecastHtml = forecastPanelHtml(series);
 
   root.innerHTML = exportReminderHtml() + statusHtml + statsHtml + doneHtml +
-    `<div class="dash-cards">${streakHtml}${weekHtml}${coverageHtml}${heatHtml}${achievementsCardHtml()}</div>`;
+    `<div class="dash-cards">${chartShell}${forecastHtml}${streakHtml}${weekHtml}${coverageHtml}</div>`;
   wireExportReminder(root);
+  renderChartCard($("verlauf-card"), series);
 
   // Erfolge prüfen (Population + Events liegen vor). Neu erfüllte -> Toast + Persistenz.
   checkAchievements(achievementCtx(pop, events));
-
-  // Heatmap-Readout
-  const heat = $("dash-heat"), readout = $("dash-heat-readout");
-  heat.addEventListener("mouseover", e=>{
-    const cell = e.target.closest(".hm-cell");
-    if(!cell || !cell.dataset.key) return;
-    readout.textContent = `${cell.dataset.key}: +${cell.dataset.pts} Punkte`;
-  });
-  heat.addEventListener("mouseleave", ()=>{ readout.textContent = "Über ein Feld fahren für Details."; });
 
   // XP-Animation, sobald Dashboard sichtbar wird: lastShownXP -> totalXP, genau einmal.
   if(pendingAnim && !statusAnimating){
@@ -2490,14 +2928,15 @@ async function renderDashboard(){
 // Registry: jede Definition hat id, name, desc, cond(ctx) und optionalen xp-Bonus.
 // xp:0 bei allen Seeds — ein echter Bonus müsste beim Freischalten in earnedXP
 // verbucht (und persistiert) werden, bislang ungenutzt.
+// prog(ctx) liefert {cur,goal} für die Fortschrittsanzeige offener Erfolge.
 const ACHIEVEMENTS = [
-  {id:"first_rating",  name:"Erster Pinselstrich", desc:"Erste Textur bewertet.",       xp:0, cond:c=> c.ratedCount >= 1},
-  {id:"ten_decent",    name:"Warmgelaufen",        desc:"10 Texturen auf 50+.",          xp:0, cond:c=> c.decentCount >= 10},
-  {id:"hundred_decent",name:"Hundertschaft",       desc:"100 Texturen auf 50+.",         xp:0, cond:c=> c.decentCount >= 100},
-  {id:"level_10",      name:"Aufgestiegen",        desc:"Level 10 erreicht.",            xp:0, cond:c=> c.level >= 10},
-  {id:"streak_7",      name:"Eine Woche dran",     desc:"7 Tage Streak.",                xp:0, cond:c=> c.streak >= 7},
-  {id:"halfway",       name:"Halbzeit",            desc:"50 % durchgespielt.",           xp:0, cond:c=> c.donePct >= 50},
-  {id:"complete",      name:"Durchgespielt",       desc:"Population komplett auf 50+.",  xp:0, cond:c=> c.popLen > 0 && c.decentCount === c.popLen},
+  {id:"first_rating",  name:"Erster Pinselstrich", desc:"Erste Textur bewertet.",       xp:0, cond:c=> c.ratedCount >= 1,   prog:c=>({cur:c.ratedCount, goal:1})},
+  {id:"ten_decent",    name:"Warmgelaufen",        desc:"10 Texturen auf 50+.",          xp:0, cond:c=> c.decentCount >= 10,  prog:c=>({cur:c.decentCount, goal:10})},
+  {id:"hundred_decent",name:"Hundertschaft",       desc:"100 Texturen auf 50+.",         xp:0, cond:c=> c.decentCount >= 100, prog:c=>({cur:c.decentCount, goal:100})},
+  {id:"level_10",      name:"Aufgestiegen",        desc:"Level 10 erreicht.",            xp:0, cond:c=> c.level >= 10,        prog:c=>({cur:c.level, goal:10})},
+  {id:"streak_7",      name:"Eine Woche dran",     desc:"7 Tage Streak.",                xp:0, cond:c=> c.streak >= 7,        prog:c=>({cur:c.streak, goal:7})},
+  {id:"halfway",       name:"Halbzeit",            desc:"50 % durchgespielt.",           xp:0, cond:c=> c.donePct >= 50,      prog:c=>({cur:Math.floor(c.donePct), goal:50})},
+  {id:"complete",      name:"Durchgespielt",       desc:"Population komplett auf 50+.",  xp:0, cond:c=> c.popLen > 0 && c.decentCount === c.popLen, prog:c=>({cur:c.decentCount, goal:c.popLen})},
 ];
 // Kontext für die Bedingungen aus Population + Event-Log.
 function achievementCtx(pop, events){
@@ -2553,20 +2992,47 @@ function soundAchievement(){
   if(!ensureAudio()) return;
   [784, 988, 1175].forEach((f,i)=> synthTone(f, i*0.07, 0.22, "triangle", 0.14));
 }
-// Dashboard-Karte: alle Erfolge, freigeschaltete hervorgehoben.
-function achievementsCardHtml(){
-  const cells = ACHIEVEMENTS.map(a=>{
-    const on = achievementsUnlocked.has(a.id);
-    return `<div class="ach-cell${on ? " on" : ""}" title="${escapeHtml(a.desc)}">`
-      + `<span class="ach-cell-ico">${ICON_TROPHY}</span>`
-      + `<div class="ach-cell-n">${escapeHtml(a.name)}</div>`
-      + `<div class="ach-cell-d">${escapeHtml(a.desc)}</div></div>`;
-  }).join("");
+// Erfolge-Seite (#view-achievements): Kopf mit Gesamtfortschritt, darunter alle
+// Erfolge als Karten; offene zeigen den Fortschritt zum Ziel (prog).
+async function renderAchievements(){
+  const root = $("achievements");
+  const evRec = await getOne("settings", "ratingEvents");
+  const events = evRec ? evRec.value : [];
+  const ctx = achievementCtx(dashPopulation(), events);
   const unlocked = ACHIEVEMENTS.filter(a=> achievementsUnlocked.has(a.id)).length;
-  return `<div class="dash-card wide">
-      <h3>Erfolge <span class="muted">(${unlocked}/${ACHIEVEMENTS.length})</span></h3>
-      <div class="ach-grid">${cells}</div>
-    </div>`;
+  const pct = ACHIEVEMENTS.length ? unlocked / ACHIEVEMENTS.length * 100 : 0;
+  const cards = ACHIEVEMENTS.map(a=>{
+    const on = achievementsUnlocked.has(a.id);
+    let stateHtml = "";
+    if(on){
+      stateHtml = `<div class="achv-state">Freigeschaltet</div>`;
+    }else if(a.prog){
+      const p = a.prog(ctx);
+      const cur = Math.max(0, Math.min(p.cur, p.goal));
+      const ppct = p.goal > 0 ? cur / p.goal * 100 : 0;
+      stateHtml = `<div class="achv-prog">
+          <div class="achv-track"><div class="achv-fill" style="width:${ppct.toFixed(0)}%"></div></div>
+          <span class="achv-num">${fmtNum(cur)} / ${fmtNum(p.goal)}</span>
+        </div>`;
+    }
+    return `<div class="achv-card${on ? " on" : ""}">
+        <span class="achv-ico">${ICON_TROPHY}</span>
+        <div class="achv-body">
+          <div class="achv-n">${escapeHtml(a.name)}</div>
+          <div class="achv-d">${escapeHtml(a.desc)}</div>
+          ${stateHtml}
+        </div>
+      </div>`;
+  }).join("");
+  root.innerHTML = `
+    <div class="achv-head">
+      <div>
+        <div class="achv-title">Erfolge</div>
+        <div class="achv-sub">${unlocked} von ${ACHIEVEMENTS.length} freigeschaltet</div>
+      </div>
+      <div class="achv-head-bar"><div style="width:${pct.toFixed(0)}%"></div></div>
+    </div>
+    <div class="achv-grid">${cards}</div>`;
 }
 
 // Auswahl geändert -> persistieren, Filter + Übersicht neu
@@ -2601,6 +3067,10 @@ async function refresh(){
   sortMode = sm ? sm.value : "low";
   const fo = await getOne("settings", "foldersOpen");
   foldersOpen = fo ? fo.value : false;
+  const cm = await getOne("settings", "chartMetric");
+  chartMetric = cm && CHART_METRICS.some(([v])=> v === cm.value) ? cm.value : "cumxp";
+  const cr = await getOne("settings", "chartRange");
+  chartRange = cr && CHART_RANGES.some(([v])=> v === cr.value) ? cr.value : "week";
   const ac = await getOne("settings", "achievements");
   achievementsUnlocked = new Set(ac ? ac.value : []);
   const le = await getOne("settings", "lastExportAt");
@@ -2639,6 +3109,7 @@ async function refresh(){
   renderFilters();
   renderAll();
   if(curView === "reports") renderReports();
+  else if(curView === "achievements") renderAchievements();
   else if(curView === "dashboard"){ pendingAnim = true; renderDashboard(); }
 }
 
@@ -2765,9 +3236,10 @@ $("reset").addEventListener("click", async ()=>{
 
 /* ---------- Ansichts-Umschalter (Bewerten / Dashboard) ---------- */
 function applyView(view){
-  const v = (view === "dashboard" || view === "reports") ? view : "rate";
+  const v = ["dashboard","achievements","reports"].includes(view) ? view : "rate";
   $("view-rate").hidden = v !== "rate";
   $("view-dashboard").hidden = v !== "dashboard";
+  $("view-achievements").hidden = v !== "achievements";
   $("view-reports").hidden = v !== "reports";
   $("view-finish").hidden = true;                         // Abschluss ist transient
   document.querySelectorAll("#view-switch .segbtn")
@@ -2778,6 +3250,7 @@ async function setView(view){
   pendingReport = null;                                   // Abschluss-Screen verlassen
   applyView(view);
   if(view === "dashboard"){ pendingAnim = true; renderDashboard(); }   // live neu rechnen + Animation
+  else if(view === "achievements") renderAchievements();  // aktueller Stand bei jedem Aufruf
   else if(view === "reports") renderReports();
   await putOne("settings", {key:"view", value:view});     // persistieren
 }
