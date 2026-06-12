@@ -728,6 +728,18 @@
   .sf-ico{vertical-align:-4px}
   .sf-flame{color:#ef9f3a}
   .sf-medal{color:#5b9cff}
+
+  /* ---- Autosave-Indikator (unten rechts, kleiner + dezenter als .ach-toast) ---- */
+  #autosave-ind{
+    position:fixed; right:18px; bottom:18px; z-index:290;
+    display:flex; gap:8px; align-items:center;
+    background:var(--panel2); border:1px solid var(--border); border-radius:8px;
+    padding:7px 12px; font-size:12px; color:var(--muted);
+    box-shadow:0 6px 20px rgba(0,0,0,.4); pointer-events:none;
+    transform:translateY(8px); opacity:0; transition:transform .25s, opacity .25s;
+  }
+  #autosave-ind.show{transform:translateY(0); opacity:1}
+  #autosave-ind svg{color:#1D9E75; flex:0 0 auto}
 </style>
 </head>
 <body>
@@ -750,6 +762,10 @@
       <summary>Daten ▾</summary>
       <div class="menu-pop">
         <label class="menu-item filebtn">Vanilla-Baseline laden<input type="file" id="baseline-file" accept=".jar,.zip"></label>
+        <div class="menu-sep"></div>
+        <button class="menu-item" id="backup-dir-pick">Backup-Ordner wählen</button>
+        <button class="menu-item" id="backup-dir-clear">Backup-Ordner lösen</button>
+        <div class="menu-sep"></div>
         <button class="menu-item" id="backup-export">Backup exportieren</button>
         <label class="menu-item filebtn">Backup importieren<input type="file" id="backup-file" accept=".json,application/json"></label>
         <div class="menu-sep"></div>
@@ -786,6 +802,12 @@
 </main>
 
 <div id="groupbar" hidden></div>
+
+<!-- Autosave-Indikator: blendet bei jedem erfolgreichen Autosave kurz ein -->
+<div id="autosave-ind">
+  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5l10 -10"/></svg>
+  <span id="autosave-ind-text"></span>
+</div>
 
 <!-- Vollflächen-Overlay: Datei über das Fenster ziehen -->
 <div id="dropzone-overlay" hidden>
@@ -1073,6 +1095,7 @@ async function persistGroups(){
   normalizeGroups();
   buildMemberMap();
   await putOne("settings", {key:"groups", value: groups});
+  scheduleAutosave();
 }
 
 // Vorschläge: nur Ungruppierte bündeln. Bestehende Gruppen bleiben unberührt.
@@ -1316,6 +1339,7 @@ async function applyRating(t, newRating){
   // Bestwert mitziehen (auch bei gain 0 konsistent); nie Bewertetes bleibt null
   if(newVal > prevBest) t.bestRating = newVal;
   await putOne("textures", t);
+  scheduleAutosave();
 }
 
 /* ---------- Rendern ---------- */
@@ -1358,6 +1382,9 @@ let earnedXP = 0;                     // monotoner XP-Akkumulator: Summe positiv
 let chartMetric = "cumxp";            // Verlauf-Karte: cumxp | xpday | textures (persistiert)
 let chartRange = "week";              // Verlauf-Karte: week | month | year (persistiert)
 let chartAnchor = null;               // Anker-Tag (YYYY-MM-DD) des sichtbaren Fensters; null = heute (nicht persistiert)
+let backupDirHandle = null;           // DirectoryHandle des Backup-Ordners (persistiert, nur Chromium)
+let autosaveTimer = null;             // Entprell-Timer für das schlanke Autosave
+let autosaveIndTimer = null;          // Ausblend-Timer des Autosave-Indikators
 
 // Sektion sortieren: alpha nach Name, sonst nach effectiveRating (auf-/absteigend),
 // Gleichstand nach Name. effectiveRating = rating ?? 0 -> Unbewertete sind 0.
@@ -2215,6 +2242,7 @@ async function saveReport(rep){
 async function finishSession(){
   const rep = buildReport();
   await saveReport(rep);
+  writeFullBackupToDir();      // bewusst ohne await: Abschluss nie blockieren, Fehler intern
   pendingReport = rep;
   $("rater").hidden = true;
   document.body.style.overflow = "";
@@ -3077,6 +3105,8 @@ async function refresh(){
   lastExportAt = le ? le.value : null;
   const rs = await getOne("settings", "ratingsSinceExport");
   ratingsSinceExport = rs ? rs.value : 0;
+  const bd = await getOne("settings", "backupDirHandle");
+  backupDirHandle = bd ? bd.value : null;
   const vw = await getOne("settings", "view");
   const curView = vw ? vw.value : "rate";
   applyView(curView);
@@ -3113,9 +3143,153 @@ async function refresh(){
   else if(curView === "dashboard"){ pendingAnim = true; renderDashboard(); }
 }
 
+/* ---------- Auto-Backup: File System Access API (nur Chromium) ---------- */
+// Ordner wählen: DirectoryHandle ist in Chromium IndexedDB-serialisierbar und
+// überlebt so den Reload. Ohne API bleibt der Eintrag deaktiviert (Wiring unten).
+async function pickBackupDir(){
+  if(!window.showDirectoryPicker){
+    setStatus("Backup-Ordner braucht die File System Access API (Chromium). Der manuelle Export bleibt nutzbar.");
+    return;
+  }
+  $("data-menu").open = false;
+  try{
+    const handle = await window.showDirectoryPicker({mode:"readwrite"});
+    backupDirHandle = handle;
+    await putOne("settings", {key:"backupDirHandle", value:handle});
+    setStatus(`Backup-Ordner gewählt: ${handle.name}. Automatisches Speichern ist an.`);
+  }catch(err){
+    if(err.name === "AbortError") return;          // Nutzer hat den Dialog abgebrochen
+    console.error(err);
+    setStatus("Backup-Ordner: " + err.message);
+  }
+}
+async function clearBackupDir(){
+  $("data-menu").open = false;
+  backupDirHandle = null;
+  await putOne("settings", {key:"backupDirHandle", value:null});
+  setStatus("Backup-Ordner gelöst. Automatisches Speichern ist aus.");
+}
+
+// Datei in den Backup-Ordner schreiben. false = Aufrufer fällt auf den
+// Download-Pfad zurück (kein Handle, Permission verweigert, Schreibfehler).
+// Wirft nie: Permission kann jederzeit entzogen sein, requestPermission braucht
+// eine Nutzergeste und kann im Timer-Kontext scheitern -> alles try/catch.
+async function writeFileToBackupDir(filename, blob){
+  if(!backupDirHandle) return false;
+  try{
+    let perm = await backupDirHandle.queryPermission({mode:"readwrite"});
+    if(perm !== "granted") perm = await backupDirHandle.requestPermission({mode:"readwrite"});
+    if(perm !== "granted"){
+      setStatus("Backup-Ordner: Schreibrecht nicht erteilt — automatisches Speichern pausiert.");
+      return false;
+    }
+    const fh = await backupDirHandle.getFileHandle(filename, {create:true});
+    const w = await fh.createWritable();
+    await w.write(blob);
+    await w.close();
+    return true;
+  }catch(err){
+    console.error(err);
+    setStatus("Backup-Ordner: Schreiben fehlgeschlagen (" + err.message + ").");
+    return false;
+  }
+}
+// Nur die jüngsten `keep` Dateien mit dem Präfix behalten (Namen tragen den
+// Zeitstempel -> absteigend sortiert = neueste zuerst). Nur für die vollen
+// Snapshots gedacht; Fehler werden toleriert (Datei evtl. gerade gesperrt).
+async function pruneBackupDir(prefix, keep){
+  if(!backupDirHandle) return;
+  try{
+    const names = [];
+    for await (const entry of backupDirHandle.values()){
+      if(entry.kind === "file" && entry.name.startsWith(prefix)) names.push(entry.name);
+    }
+    names.sort((a,b)=> b.localeCompare(a));
+    for(const name of names.slice(keep)){
+      try{ await backupDirHandle.removeEntry(name); }catch(err){ console.error(err); }
+    }
+  }catch(err){ console.error(err); }
+}
+
+// Schlankes Backup: wie exportBackup, aber ohne Bilder (dataUrl/prevDataUrl
+// ausgelassen, nicht geleert) und ohne backupDirHandle (nicht portabel).
+// Nur auf demselben Rechner/Browser selbst-wiederherstellend — die Bilder
+// liegen dort in IndexedDB. Für Umzug/Totalverlust dient der volle Snapshot.
+async function buildLeanBackup(){
+  const textures = (await getAll("textures")).map(t=>{
+    const {dataUrl, prevDataUrl, ...rest} = t;
+    return rest;
+  });
+  const settings = {};
+  (await getAll("settings")).forEach(s=>{
+    if(s.key !== "backupDirHandle") settings[s.key] = s.value;
+  });
+  return {app:"mc-texture-rater", kind:"lean", version:1,
+          exportedAt:new Date().toISOString(), textures, settings};
+}
+// Autosave ist lautlos optional: ohne gewählten Ordner passiert nichts
+// (kein Download, kein Fehler). Fester Dateiname -> immer überschreiben.
+async function autosaveLean(){
+  if(!backupDirHandle) return;
+  try{
+    const data = await buildLeanBackup();
+    const blob = new Blob([JSON.stringify(data)], {type:"application/json"});
+    if(await writeFileToBackupDir("autosave.json", blob)){
+      showAutosaveIndicator();
+      await putOne("settings", {key:"lastAutosaveAt", value:new Date().toISOString()});
+    }
+  }catch(err){ console.error(err); }
+}
+// Entprellung: schnelles Bewerten -> genau ein Schreibvorgang ~3 s nach der letzten Aktion.
+function scheduleAutosave(){
+  clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(autosaveLean, 3000);
+}
+// Indikator unten rechts: ~2 s sichtbar, dann sanft ausblenden (Opacity-Transition
+// wie .ach-toast). Mehrfachaufrufe resetten nur den Timer, nichts stapelt.
+function showAutosaveIndicator(){
+  const el = $("autosave-ind"); if(!el) return;
+  const d = new Date(), p = n=> String(n).padStart(2,"0");
+  $("autosave-ind-text").textContent = `Gespeichert ${p(d.getHours())}:${p(d.getMinutes())}`;
+  el.classList.add("show");
+  clearTimeout(autosaveIndTimer);
+  autosaveIndTimer = setTimeout(()=> el.classList.remove("show"), 2000);
+}
+// Voller Snapshot MIT Bildern, nur am Session-Ende (teuer, mehrere MB). Still in
+// den Ordner, danach auf die letzten 20 prunen. Zählt als vollwertiges Backup
+// -> Erinnerungs-Zähler zurücksetzen. Fehler blockieren den Abschluss nie.
+async function writeFullBackupToDir(){
+  if(!backupDirHandle) return;
+  try{
+    const textures = await getAll("textures");
+    const settings = {};
+    (await getAll("settings")).forEach(s=>{
+      if(s.key !== "backupDirHandle") settings[s.key] = s.value;
+    });
+    const data = {app:"mc-texture-rater", kind:"full", version:1,
+                  exportedAt:new Date().toISOString(), textures, settings};
+    const blob = new Blob([JSON.stringify(data)], {type:"application/json"});
+    const d = new Date(), p = n=> String(n).padStart(2,"0");
+    const fn = `texturepack-full-${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`
+      + `_${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}.json`;
+    if(await writeFileToBackupDir(fn, blob)){
+      await pruneBackupDir("texturepack-full-", 20);
+      lastExportAt = new Date().toISOString();
+      ratingsSinceExport = 0;
+      await putOne("settings", {key:"lastExportAt", value:lastExportAt});
+      await putOne("settings", {key:"ratingsSinceExport", value:0});
+    }
+  }catch(err){
+    console.error(err);
+    setStatus("Auto-Backup fehlgeschlagen: " + err.message);
+  }
+}
+
 /* ---------- Backup: Erinnerung ---------- */
 // Fällig, wenn seit dem letzten Export zu viele Bewertungen liefen oder es zu lange her ist.
+// Aktiver Backup-Ordner = Autosave läuft -> gilt als gesichert, nie fällig.
 function exportReminderDue(){
+  if(backupDirHandle) return false;
   if(ratingsSinceExport > EXPORT_REMINDER_AFTER) return true;
   if(lastExportAt){
     const days = (Date.now() - new Date(lastExportAt).getTime()) / 86400000;
@@ -3170,7 +3344,10 @@ async function exportBackup(){
   }
 }
 
-// JSON-Backup einlesen, prüfen, nach Bestätigung Stores komplett ersetzen.
+// JSON-Backup einlesen und prüfen. kind "full" (oder fehlend = Altdatei):
+// Stores nach Bestätigung komplett ersetzen, inkl. Bilder. kind "lean": nur den
+// Wertungszustand per id auf die vorhandenen Texturen mappen — Bilder fehlen in
+// der Datei und bleiben die lokalen.
 async function importBackup(file){
   try{
     const text = await file.text();
@@ -3186,14 +3363,48 @@ async function importBackup(file){
       setStatus("Import-Fehler: Backup unvollständig (textures/settings fehlen).");
       return;
     }
+    // backupDirHandle gehört nie in eine portable Datei (und wäre als leeres
+    // Objekt kaputt) -> aus den Datei-Settings immer ausfiltern.
+    const settingsRecords = Object.entries(data.settings)
+      .filter(([key])=> key !== "backupDirHandle")
+      .map(([key,value])=>({key,value}));
+
+    if(data.kind === "lean"){
+      if(!confirm(
+        `Schlankes Autosave importieren?\n`
+        + `Wertungen, Gruppen und Einstellungen aus der Datei ersetzen den aktuellen Stand. `
+        + `Die Datei enthält keine Bilder — sie bleiben die lokal vorhandenen. Nicht umkehrbar.`)) return;
+      const existing = await getAll("textures");
+      const exMap = new Map(existing.map(t=>[t.id, t]));
+      const toPut = [];
+      let skipped = 0;
+      for(const src of data.textures){
+        const t = exMap.get(src.id);
+        if(!t){ skipped++; continue; }     // Bild nie geladen -> erst ZIP/volles Backup
+        t.rating       = src.rating       !== undefined ? src.rating       : null;
+        t.bestRating   = src.bestRating   !== undefined ? src.bestRating   : t.bestRating;
+        t.rateOverride = src.rateOverride !== undefined ? src.rateOverride : null;
+        t.flag         = src.flag         !== undefined ? src.flag         : null;
+        t.prevRating   = src.prevRating   !== undefined ? src.prevRating   : null;
+        toPut.push(t);
+      }
+      if(toPut.length) await putAll("textures", toPut);
+      if(settingsRecords.length) await putAll("settings", settingsRecords);
+      await refresh();
+      setStatus(`Lean-Backup importiert: ${toPut.length} Texturen aktualisiert`
+        + (skipped ? `, ${skipped} übersprungen (lokal kein Bild — erst ZIP oder volles Backup laden)` : "")
+        + ".");
+      return;
+    }
+
     if(!confirm(
       `Aktuellen Stand vollständig ersetzen?\n`
-      + `${data.textures.length} Texturen und ${Object.keys(data.settings).length} `
+      + `${data.textures.length} Texturen und ${settingsRecords.length} `
       + `Einstellungen aus dem Backup werden geschrieben. Nicht umkehrbar.`)) return;
-    // leeren, dann zurückschreiben
+    // leeren, dann zurückschreiben; den lokalen Backup-Ordner über den Import retten
     await clearDB();
+    if(backupDirHandle) await putOne("settings", {key:"backupDirHandle", value:backupDirHandle});
     if(data.textures.length) await putAll("textures", data.textures);
-    const settingsRecords = Object.entries(data.settings).map(([key,value])=>({key,value}));
     if(settingsRecords.length) await putAll("settings", settingsRecords);
     // Ansicht komplett neu aus DB aufbauen -> Wertungen + Ø stimmen wieder
     await refresh();
@@ -3216,6 +3427,15 @@ $("baseline-file").addEventListener("change", e=>{
   if(f) handleBaseline(f);
   e.target.value = ""; // gleiche Datei erneut wählbar
 });
+
+$("backup-dir-pick").addEventListener("click", pickBackupDir);
+$("backup-dir-clear").addEventListener("click", clearBackupDir);
+// Feature-Detection: ohne File System Access API (kein Chromium) bleibt der
+// Eintrag deaktiviert; der manuelle Download-Pfad ist davon unberührt.
+if(!window.showDirectoryPicker){
+  $("backup-dir-pick").disabled = true;
+  $("backup-dir-pick").title = "Braucht die File System Access API (Chromium)";
+}
 
 $("backup-export").addEventListener("click", exportBackup);
 
