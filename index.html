@@ -579,6 +579,16 @@
     height:100%; border-radius:6px; background:#ffcc44;
     box-shadow:0 0 10px rgba(255,204,68,.55);
   }
+  .achv-sec{
+    display:flex; align-items:baseline; gap:10px;
+    margin:26px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--border);
+  }
+  .achv-head+.achv-sec{margin-top:4px}
+  .achv-sec h3{
+    margin:0; font-size:12px; font-weight:600;
+    letter-spacing:2px; text-transform:uppercase; color:var(--muted);
+  }
+  .achv-sec .cnt{font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums}
   .achv-grid{display:grid; gap:14px; grid-template-columns:repeat(auto-fill, minmax(280px,1fr))}
   .achv-card{
     display:flex; gap:14px; align-items:flex-start; padding:16px 18px;
@@ -618,6 +628,40 @@
   .ach-h{font-size:11px; letter-spacing:2px; text-transform:uppercase; color:#ffcc44}
   .ach-n{font-size:17px; font-weight:700}
   .ach-d{font-size:12px; color:var(--muted)}
+
+  /* ---- Tägliches Streak-Popup (zentrale Modal-Karte, über dem Rater) ---- */
+  #streak-popup{
+    position:fixed; inset:0; z-index:350;
+    display:flex; align-items:center; justify-content:center;
+    background:rgba(15,17,21,.72);
+    opacity:0; transition:opacity .25s;
+  }
+  #streak-popup.show{opacity:1}
+  .streak-modal{
+    width:min(420px, 90vw); text-align:center; padding:30px 34px 26px;
+    border:1px solid rgba(239,159,58,.45); border-radius:14px;
+    background:
+      radial-gradient(120% 120% at 50% -20%, rgba(239,159,58,.14), transparent 60%),
+      linear-gradient(180deg,#161b26,#12151c);
+    box-shadow:inset 0 0 28px rgba(239,159,58,.10), 0 18px 50px rgba(0,0,0,.55);
+    transform:scale(.92); transition:transform .25s;
+  }
+  #streak-popup.show .streak-modal{transform:scale(1)}
+  .stp-tag{
+    font-size:11px; letter-spacing:3px; color:#ef9f3a; text-transform:uppercase;
+    text-shadow:0 0 8px rgba(239,159,58,.6);
+  }
+  .stp-big{
+    margin-top:16px; font-size:64px; font-weight:800; line-height:1; color:#fff;
+    font-variant-numeric:tabular-nums; text-shadow:0 0 22px rgba(239,159,58,.55);
+  }
+  .stp-big svg{width:46px; height:46px; vertical-align:-4px; color:#ef9f3a; filter:drop-shadow(0 0 10px rgba(239,159,58,.6))}
+  .stp-sub{margin-top:8px; font-size:12px; letter-spacing:2px; text-transform:uppercase; color:var(--muted)}
+  .stp-best{margin-top:18px; font-size:14px; color:var(--muted); font-variant-numeric:tabular-nums}
+  .stp-best svg{color:#5b9cff; vertical-align:-5px}
+  .stp-msg{margin-top:14px; font-size:14px; color:var(--fg)}
+  .stp-btn{margin-top:22px}
+  .stp-btn button{font-size:15px; padding:10px 28px}
 
   /* ---- Button gesperrt ---- */
   button:disabled{opacity:.45; cursor:not-allowed}
@@ -1340,6 +1384,7 @@ async function applyRating(t, newRating){
   if(newVal > prevBest) t.bestRating = newVal;
   await putOne("textures", t);
   scheduleAutosave();
+  maybeShowStreakPopup().catch(console.error);   // erste Wertung des Tages -> Popup (einmal pro Tag)
 }
 
 /* ---------- Rendern ---------- */
@@ -1385,6 +1430,8 @@ let chartAnchor = null;               // Anker-Tag (YYYY-MM-DD) des sichtbaren F
 let backupDirHandle = null;           // DirectoryHandle des Backup-Ordners (persistiert, nur Chromium)
 let autosaveTimer = null;             // Entprell-Timer für das schlanke Autosave
 let autosaveIndTimer = null;          // Ausblend-Timer des Autosave-Indikators
+let loginDays = [];                   // localDay-Strings aller Tage mit geöffnetem Tool (persistiert)
+let streakPopupShownDay = null;       // letzter Tag, an dem das Streak-Popup erschien (persistiert)
 
 // Sektion sortieren: alpha nach Name, sonst nach effectiveRating (auf-/absteigend),
 // Gleichstand nach Name. effectiveRating = rating ?? 0 -> Unbewertete sind 0.
@@ -2795,6 +2842,11 @@ function activeDaySet(events){
   });
   return s;
 }
+// Streak-Basis: ein aktiver Tag für die Streak ist jeder Tag mit Login ODER
+// mindestens einer Wertung — Vereinigung aus loginDays und den Event-Tagen.
+function streakDaySet(events){
+  return new Set([...activeDaySet(events), ...loginDays]);
+}
 // aktuelle Streak: aufeinanderfolgende aktive Tage rückwärts ab heute.
 // Heute noch ohne Aktivität -> ab gestern zählen (kein Bruch).
 function currentStreak(days){
@@ -2814,6 +2866,57 @@ function bestStreak(days){
   }
   return best;
 }
+/* ---------- Tägliches Streak-Popup ---------- */
+// Erscheint genau einmal pro Tag, ausgelöst von der ersten echten Wertung des
+// Tages (Trigger am Ende von applyRating). Exclude-Toggles laufen nicht über
+// applyRating und lösen es darum nie aus.
+const STREAK_MESSAGES = [
+  "Dranbleiben zahlt sich aus.",
+  "Jeden Tag ein Stück näher am Ziel.",
+  "Die Kette hält. Weiter so.",
+  "Konstanz schlägt Talent.",
+  "Wieder ein Schritt Richtung Level 100.",
+];
+async function maybeShowStreakPopup(){
+  const today = localDay(new Date());
+  if(streakPopupShownDay === today) return;
+  streakPopupShownDay = today;
+  await putOne("settings", {key:"streakPopupShownDay", value:today});
+  const evRec = await getOne("settings", "ratingEvents");
+  const days = streakDaySet(evRec ? evRec.value : []);
+  showStreakPopup(currentStreak(days), bestStreak(days));
+}
+function showStreakPopup(cur, best){
+  const old = $("streak-popup"); if(old) old.remove();
+  const el = document.createElement("div");
+  el.id = "streak-popup";
+  el.innerHTML = `
+    <div class="streak-modal">
+      <div class="stp-tag">Tages-Streak</div>
+      <div class="stp-big">${ICON_FLAME} ${cur}</div>
+      <div class="stp-sub">Tage am Stück</div>
+      <div class="stp-best">${ICON_MEDAL} Beste Streak: ${best}</div>
+      <div class="stp-msg">${escapeHtml(STREAK_MESSAGES[cur % STREAK_MESSAGES.length])}</div>
+      <div class="stp-btn"><button class="primary" id="stp-close">Weiter</button></div>
+    </div>`;
+  const close = ()=>{
+    document.removeEventListener("keydown", onKey, true);
+    el.classList.remove("show");
+    setTimeout(()=> el.remove(), 260);
+    // Bewerten-Flow nicht stören: Fokus zurück ins Eingabefeld des Raters
+    if(!$("rater").hidden){ $("rate-value").focus(); $("rate-value").select(); }
+  };
+  // Capture-Phase: Esc schließt nur das Popup, erreicht nie den Rater-Handler
+  const onKey = e=>{
+    if(e.key === "Escape"){ e.preventDefault(); e.stopPropagation(); close(); }
+  };
+  el.addEventListener("click", e=>{ if(e.target === el) close(); });
+  el.querySelector("#stp-close").addEventListener("click", close);
+  document.addEventListener("keydown", onKey, true);
+  document.body.appendChild(el);
+  requestAnimationFrame(()=> el.classList.add("show"));
+}
+
 // Tempo: mittlere XP je aktivem Tag (xpGained > 0) über die letzten 14 aktiven
 // Tage der Tagesreihe (buildDailySeries).
 function dailyTempo(series){
@@ -2882,8 +2985,8 @@ async function renderDashboard(){
       <div class="hint">100 % durchgespielt = jede Textur der Population auf 50+.</div>
     </div>`;
 
-  // Streak: aktive Tage (jeder Tag mit mindestens einem Event)
-  const days = activeDaySet(events);
+  // Streak: aktive Tage = Login ODER mindestens eine Wertung (streakDaySet)
+  const days = streakDaySet(events);
   const streakHtml = `
     <div class="dash-card">
       <h3>Streak</h3>
@@ -2891,7 +2994,7 @@ async function renderDashboard(){
         <div><div class="big"><span class="sf-flame">${ICON_FLAME}</span> ${currentStreak(days)}</div><div class="sub">aktuelle Streak (Tage)</div></div>
         <div><div class="big"><span class="sf-medal">${ICON_MEDAL}</span> ${bestStreak(days)}</div><div class="sub">beste Streak</div></div>
       </div>
-      <div class="hint">Ein aktiver Tag ist jeder Tag mit mindestens einer Bewertung.</div>
+      <div class="hint">Schon das Öffnen des Tools zählt den Tag für die Streak.</div>
     </div>`;
 
   // Diese Woche: distinkte bearbeitete Texturen + gewonnene XP (positive Deltas)
@@ -2942,7 +3045,7 @@ async function renderDashboard(){
   renderChartCard($("verlauf-card"), series);
 
   // Erfolge prüfen (Population + Events liegen vor). Neu erfüllte -> Toast + Persistenz.
-  checkAchievements(achievementCtx(pop, events));
+  checkAchievements(await achievementCtx(pop, events));
 
   // XP-Animation, sobald Dashboard sichtbar wird: lastShownXP -> totalXP, genau einmal.
   if(pendingAnim && !statusAnimating){
@@ -2953,29 +3056,95 @@ async function renderDashboard(){
 }
 
 /* ---------- Erfolge (Achievements) ---------- */
-// Registry: jede Definition hat id, name, desc, cond(ctx) und optionalen xp-Bonus.
-// xp:0 bei allen Seeds — ein echter Bonus müsste beim Freischalten in earnedXP
-// verbucht (und persistiert) werden, bislang ungenutzt.
+// Registry: jede Definition hat id, name, desc, cond(ctx) und xp:0 — Erfolge
+// sind reine Anerkennung. Ein echter XP-Bonus müsste beim Freischalten in
+// earnedXP verbucht werden, sonst bricht die Monotonie-Konsistenz.
 // prog(ctx) liefert {cur,goal} für die Fortschrittsanzeige offener Erfolge.
+// Kategorie je ctx-Feld: die Erfolge-Seite gruppiert die Karten unter diesen Überschriften.
+const ACH_CATS = {ratedCount:"Fleiß", decentCount:"Durchgespielt", count60:"Qualität",
+ count70:"Qualität", count80:"Qualität", count90:"Qualität", donePct:"Gesamtfortschritt",
+ level:"Level und Ränge", streak:"Streak", sessionCount:"Sessions"};
+// numAch: Standard-Schwellen-Erfolg über ein numerisches ctx-Feld.
+const numAch = (id, name, desc, field, goal)=>(
+  {id, name, desc, cat:ACH_CATS[field], xp:0, cond:c=> c[field] >= goal, prog:c=>({cur:Math.floor(c[field]), goal})});
+// Reihenfolge = thematische Cluster; die Erfolge-Seite rendert in dieser Ordnung.
 const ACHIEVEMENTS = [
-  {id:"first_rating",  name:"Erster Pinselstrich", desc:"Erste Textur bewertet.",       xp:0, cond:c=> c.ratedCount >= 1,   prog:c=>({cur:c.ratedCount, goal:1})},
-  {id:"ten_decent",    name:"Warmgelaufen",        desc:"10 Texturen auf 50+.",          xp:0, cond:c=> c.decentCount >= 10,  prog:c=>({cur:c.decentCount, goal:10})},
-  {id:"hundred_decent",name:"Hundertschaft",       desc:"100 Texturen auf 50+.",         xp:0, cond:c=> c.decentCount >= 100, prog:c=>({cur:c.decentCount, goal:100})},
-  {id:"level_10",      name:"Aufgestiegen",        desc:"Level 10 erreicht.",            xp:0, cond:c=> c.level >= 10,        prog:c=>({cur:c.level, goal:10})},
-  {id:"streak_7",      name:"Eine Woche dran",     desc:"7 Tage Streak.",                xp:0, cond:c=> c.streak >= 7,        prog:c=>({cur:c.streak, goal:7})},
-  {id:"halfway",       name:"Halbzeit",            desc:"50 % durchgespielt.",           xp:0, cond:c=> c.donePct >= 50,      prog:c=>({cur:Math.floor(c.donePct), goal:50})},
-  {id:"complete",      name:"Durchgespielt",       desc:"Population komplett auf 50+.",  xp:0, cond:c=> c.popLen > 0 && c.decentCount === c.popLen, prog:c=>({cur:c.decentCount, goal:c.popLen})},
+  // Fleiß: bewertete Texturen der Population
+  numAch("first_rating", "Erster Pinselstrich", "Erste Textur bewertet.",     "ratedCount", 1),
+  numAch("rated_100",    "Fleißarbeit",         "100 Texturen bewertet.",     "ratedCount", 100),
+  numAch("rated_500",    "Akkordarbeit",        "500 Texturen bewertet.",     "ratedCount", 500),
+  numAch("rated_1000",   "Tausendsassa",        "1000 Texturen bewertet.",    "ratedCount", 1000),
+  // Durchgespielt: Texturen auf 50+
+  numAch("ten_decent",    "Warmgelaufen",    "10 Texturen auf 50+.",  "decentCount", 10),
+  numAch("decent_25",     "In Fahrt",        "25 Texturen auf 50+.",  "decentCount", 25),
+  numAch("decent_50",     "Halbe Hundert",   "50 Texturen auf 50+.",  "decentCount", 50),
+  numAch("hundred_decent","Hundertschaft",   "100 Texturen auf 50+.", "decentCount", 100),
+  numAch("decent_250",    "Stapelweise",     "250 Texturen auf 50+.", "decentCount", 250),
+  numAch("decent_500",    "Massenproduktion","500 Texturen auf 50+.", "decentCount", 500),
+  // Qualität: höhere Schwellen. Harmonisierte Skala: 80+ ist extrem selten,
+  // 90+ praktisch unerreichbar -> Einzelstücke statt Mengenstufen.
+  numAch("q60_25",  "Solide Basis",       "25 Texturen auf 60+.",  "count60", 25),
+  numAch("q60_100", "Gehobener Standard", "100 Texturen auf 60+.", "count60", 100),
+  numAch("q60_300", "Qualitätsoffensive", "300 Texturen auf 60+.", "count60", 300),
+  numAch("q70_10",  "Feinschliff",        "10 Texturen auf 70+.",  "count70", 10),
+  numAch("q70_50",  "Edelarbeit",         "50 Texturen auf 70+.",  "count70", 50),
+  numAch("q70_150", "Meisterwerkstatt",   "150 Texturen auf 70+.", "count70", 150),
+  numAch("q80_1",   "Ausnahmestück",      "1 Textur auf 80+.",     "count80", 1),
+  numAch("q80_3",   "Seltene Güte",       "3 Texturen auf 80+.",   "count80", 3),
+  numAch("q80_10",  "Elitewerkstatt",     "10 Texturen auf 80+.",  "count80", 10),
+  numAch("q90_1",   "Perfektion",         "1 Textur auf 90+.",     "count90", 1),
+  // Gesamtfortschritt: je 10 % der Population durchgespielt
+  numAch("cov_10",  "Aufbruch",           "10 % durchgespielt.",  "donePct", 10),
+  numAch("cov_20",  "Fundament",          "20 % durchgespielt.",  "donePct", 20),
+  numAch("cov_30",  "Drittelmarke",       "30 % durchgespielt.",  "donePct", 30),
+  numAch("cov_40",  "Stetig voran",       "40 % durchgespielt.",  "donePct", 40),
+  numAch("halfway", "Halbzeit",           "50 % durchgespielt.",  "donePct", 50),
+  numAch("cov_60",  "Übern Berg",         "60 % durchgespielt.",  "donePct", 60),
+  numAch("cov_70",  "Klare Sicht",        "70 % durchgespielt.",  "donePct", 70),
+  numAch("cov_80",  "Schlussgerade",      "80 % durchgespielt.",  "donePct", 80),
+  numAch("cov_90",  "Fast am Ziel",       "90 % durchgespielt.",  "donePct", 90),
+  {id:"complete", name:"Durchgespielt", desc:"Population komplett auf 50+.", cat:ACH_CATS.donePct, xp:0,
+   cond:c=> c.popLen > 0 && c.decentCount === c.popLen, prog:c=>({cur:c.decentCount, goal:c.popLen})},
+  // Ränge: je erreichter Rang (Level-Schwellen der Rang-Leiter)
+  numAch("level_10",      "Rang Stein",    "Level 10 erreicht, Rang Stein.",      "level", 10),
+  numAch("rank_bronze",   "Rang Bronze",   "Level 20 erreicht, Rang Bronze.",     "level", 20),
+  numAch("rank_eisen",    "Rang Eisen",    "Level 30 erreicht, Rang Eisen.",      "level", 30),
+  numAch("rank_gold",     "Rang Gold",     "Level 40 erreicht, Rang Gold.",       "level", 40),
+  numAch("rank_redstone", "Rang Redstone", "Level 50 erreicht, Rang Redstone.",   "level", 50),
+  numAch("rank_lapis",    "Rang Lapis",    "Level 60 erreicht, Rang Lapis.",      "level", 60),
+  numAch("rank_smaragd",  "Rang Smaragd",  "Level 70 erreicht, Rang Smaragd.",    "level", 70),
+  numAch("rank_amethyst", "Rang Amethyst", "Level 80 erreicht, Rang Amethyst.",   "level", 80),
+  numAch("rank_diamant",  "Rang Diamant",  "Level 90 erreicht, Rang Diamant.",    "level", 90),
+  numAch("rank_netherit", "Rang Netherit", "Level 100 erreicht, Rang Netherit.",  "level", 100),
+  // Level-Meilensteine zwischen den Rängen
+  numAch("level_25", "Viertelhundert", "Level 25 erreicht.", "level", 25),
+  numAch("level_75", "Dreiviertel",    "Level 75 erreicht.", "level", 75),
+  // Streaks (Login ODER Wertung zählt den Tag)
+  numAch("streak_3",  "Drei am Stück",   "3 Tage Streak.",  "streak", 3),
+  numAch("streak_7",  "Eine Woche dran", "7 Tage Streak.",  "streak", 7),
+  numAch("streak_14", "Zwei Wochen",     "14 Tage Streak.", "streak", 14),
+  numAch("streak_30", "Ein Monat eisern","30 Tage Streak.", "streak", 30),
+  // Sessions: abgeschlossene Bewertungs-Sessions (über reports, max. 50 gespeichert)
+  numAch("session_5",  "Fünf Sessions", "5 Sessions abgeschlossen.",  "sessionCount", 5),
+  numAch("session_20", "Sitzfleisch",   "20 Sessions abgeschlossen.", "sessionCount", 20),
 ];
-// Kontext für die Bedingungen aus Population + Event-Log.
-function achievementCtx(pop, events){
+// Kontext für die Bedingungen aus Population + Event-Log; lädt die Session-
+// Anzahl (reports) selbst nach -> async, Aufrufer awaiten.
+async function achievementCtx(pop, events){
   const decentCount = pop.filter(t=> effectiveRating(t) >= 50).length;
   const ratedCount  = pop.filter(t=> t.rating != null).length;
+  const count60 = pop.filter(t=> effectiveRating(t) >= 60).length;
+  const count70 = pop.filter(t=> effectiveRating(t) >= 70).length;
+  const count80 = pop.filter(t=> effectiveRating(t) >= 80).length;
+  const count90 = pop.filter(t=> effectiveRating(t) >= 90).length;
   const popLen = pop.length;
+  const repRec = await getOne("settings", "reports");
   return {
-    decentCount, ratedCount, popLen,
+    decentCount, ratedCount, popLen, count60, count70, count80, count90,
     donePct: popLen ? decentCount / popLen * 100 : 0,
     level: levelInfo(earnedXP).level,
-    streak: currentStreak(activeDaySet(events)),
+    streak: currentStreak(streakDaySet(events)),
+    sessionCount: repRec ? repRec.value.length : 0,
   };
 }
 // Neu erfüllte Erfolge freischalten, persistieren, Toast je neuem Erfolg.
@@ -3020,16 +3189,17 @@ function soundAchievement(){
   if(!ensureAudio()) return;
   [784, 988, 1175].forEach((f,i)=> synthTone(f, i*0.07, 0.22, "triangle", 0.14));
 }
-// Erfolge-Seite (#view-achievements): Kopf mit Gesamtfortschritt, darunter alle
-// Erfolge als Karten; offene zeigen den Fortschritt zum Ziel (prog).
+// Erfolge-Seite (#view-achievements): Kopf mit Gesamtfortschritt, darunter die
+// Erfolge als Karten in Kategorie-Sektionen (cat, Registry-Reihenfolge);
+// offene zeigen den Fortschritt zum Ziel (prog).
 async function renderAchievements(){
   const root = $("achievements");
   const evRec = await getOne("settings", "ratingEvents");
   const events = evRec ? evRec.value : [];
-  const ctx = achievementCtx(dashPopulation(), events);
+  const ctx = await achievementCtx(dashPopulation(), events);
   const unlocked = ACHIEVEMENTS.filter(a=> achievementsUnlocked.has(a.id)).length;
   const pct = ACHIEVEMENTS.length ? unlocked / ACHIEVEMENTS.length * 100 : 0;
-  const cards = ACHIEVEMENTS.map(a=>{
+  const cardHtml = a=>{
     const on = achievementsUnlocked.has(a.id);
     let stateHtml = "";
     if(on){
@@ -3051,6 +3221,19 @@ async function renderAchievements(){
           ${stateHtml}
         </div>
       </div>`;
+  };
+  // aufeinanderfolgende Karten gleicher Kategorie zu Sektionen bündeln
+  const blocks = [];
+  ACHIEVEMENTS.forEach(a=>{
+    const last = blocks[blocks.length - 1];
+    if(!last || last.cat !== a.cat) blocks.push({cat:a.cat, items:[a]});
+    else last.items.push(a);
+  });
+  const secs = blocks.map(b=>{
+    const got = b.items.filter(a=> achievementsUnlocked.has(a.id)).length;
+    return `<div class="achv-sec"><h3>${escapeHtml(b.cat)}</h3>`
+      + `<span class="cnt">${got} / ${b.items.length}</span></div>`
+      + `<div class="achv-grid">${b.items.map(cardHtml).join("")}</div>`;
   }).join("");
   root.innerHTML = `
     <div class="achv-head">
@@ -3060,7 +3243,7 @@ async function renderAchievements(){
       </div>
       <div class="achv-head-bar"><div style="width:${pct.toFixed(0)}%"></div></div>
     </div>
-    <div class="achv-grid">${cards}</div>`;
+    ${secs}`;
 }
 
 // Auswahl geändert -> persistieren, Filter + Übersicht neu
@@ -3107,6 +3290,16 @@ async function refresh(){
   ratingsSinceExport = rs ? rs.value : 0;
   const bd = await getOne("settings", "backupDirHandle");
   backupDirHandle = bd ? bd.value : null;
+  const ld = await getOne("settings", "loginDays");
+  loginDays = ld ? ld.value : [];
+  const spd = await getOne("settings", "streakPopupShownDay");
+  streakPopupShownDay = spd ? spd.value : null;
+  // Login registrieren: schon das Öffnen des Tools zählt den Tag für die Streak
+  const todayKey = localDay(new Date());
+  if(!loginDays.includes(todayKey)){
+    loginDays.push(todayKey);
+    await putOne("settings", {key:"loginDays", value:loginDays});
+  }
   const vw = await getOne("settings", "view");
   const curView = vw ? vw.value : "rate";
   applyView(curView);
